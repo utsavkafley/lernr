@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+
+# Env vars
+.env
+
+# Alembic
+*.pyc
+
+# macOS
+.DS_Store
+
+# Data (transcripts will be added manually)
+data/parsed/

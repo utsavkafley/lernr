@@ -4,8 +4,10 @@ sqlalchemy
 alembic
 psycopg2-binary
 pydantic-settings
+pydantic[email]
 python-jose[cryptography]
 passlib[bcrypt]
+bcrypt==3.2.2
 slowapi
 anthropic
 langgraph

@@ -177,8 +177,9 @@ users
 | track_id | INTEGER | FK → tracks.id |
 | prompt | TEXT | The teacher's question, in English |
 | answer | TEXT | The canonical expected Spanish answer |
-| alternate_answers | TEXT[] | Additional accepted forms parsed from transcripts (e.g. "/" delimited variants) |
+| alternate_answers | TEXT[] | Additional accepted forms |
 | order_in_track | INTEGER | Position within the track (1-indexed) |
+| generated_for_user_id | UUID | Nullable FK → users.id. NULL = seeded question available to all users. Set = generated on-the-fly for a specific user who exhausted the seeded pool. |
 
 #### `question_concepts` (join table)
 | Column | Type | Notes |
@@ -229,138 +230,69 @@ backend/
 
 The Docker Compose backend entrypoint should run `alembic upgrade head` before starting uvicorn so dev and prod environments are always in sync.
 
-### 4.1 Transcript parsing
+### 4.1 Transcript splitting
 
-The LT Spanish transcripts follow a conversational format. The parser needs to extract Q&A pairs from this structure.
+**Script:** `scripts/split_transcripts.py` (already complete)
 
-**Input:** Raw transcript text files (one per track, stored in `data/transcripts/`)
+**Input:** `data/transcripts/Spanish_Transcript_All_Tracks.pdf`
 
-**Expected transcript patterns to handle:**
+**Output:** One raw text file per track in `data/transcripts/spanish/track_02.txt` … `track_90.txt`. Track 01 is intro-only with no Q&A and is skipped in all subsequent steps.
+
+The regex parser approach (`parse_transcripts.py`) was prototyped and abandoned — regex cannot reliably distinguish correct answers from wrong student attempts, or Spanish-practice exchanges from English metalanguage exchanges. Extraction is handled by the LLM in §4.2.
+
+### 4.2 Concept categorization and Q&A extraction
+
+**Script:** `scripts/categorize.py`
+
+**Input:** Raw track text files from `data/transcripts/spanish/`
+
+**One LLM call per track.** The LLM reads the full transcript in order — giving it the same context a human reviewer has — and simultaneously extracts clean Q&A pairs and tags each with concepts. This resolves what regex cannot: wrong student attempts vs. confirmed answers, English metalanguage exchanges vs. Spanish practice prompts, and self-corrections mid-exchange.
+
+**Approach:**
+1. For each track text file, send the full raw text to the Anthropic API with a prompt like:
+
 ```
-Teacher: How would you say "I want"?
-Student: Quiero.
+You are processing a Language Transfer Complete Spanish transcript.
 
-Teacher: And how would you say "I want to explain"?
-Student: Quiero explicar.
+Read this transcript in full and return two things:
 
-Teacher: Good. Now, how would you say "I want to explain something to you"?
-Student: Quiero explicarte algo. / Quiero explicar algo a ti.
-```
+1. The Spanish language concepts taught in this track. Use names from this taxonomy:
+   [CONCEPT_TAXONOMY list]
+   If a concept is genuinely not in the list, flag it — do not invent a name.
 
-**Output:** Structured JSON per track (stored in `data/parsed/`):
-```json
+2. Clean Q&A pairs for every exchange where the student constructs a Spanish answer.
+   Rules:
+   - Use the final confirmed-correct Spanish answer, not wrong attempts.
+   - Skip exchanges where the student answers in English (vocabulary translation,
+     metalanguage questions like "what do you notice?").
+   - If the student gives gender variants (e.g. "listo / lista"), include the
+     masculine form as the answer and feminine as an alternate.
+   - Strip verbal filler from answers ("or...", "I think...", trailing "?").
+   - Tag each Q&A pair with the relevant concept(s) from the list above.
+
+Return JSON only:
 {
-  "track_number": 15,
+  "track_number": <int>,
   "questions": [
     {
-      "order": 1,
-      "prompt": "How would you say \"I want\"?",
-      "answer": "Quiero",
-      "alternate_answers": []
-    },
-    {
-      "order": 2,
-      "prompt": "How would you say \"I want to explain\"?",
-      "answer": "Quiero explicar",
-      "alternate_answers": []
-    },
-    {
-      "order": 3,
-      "prompt": "How would you say \"I want to explain something to you\"?",
-      "answer": "Quiero explicarte algo",
-      "alternate_answers": ["Quiero explicar algo a ti"]
+      "order": <int>,
+      "prompt": "<teacher question>",
+      "answer": "<clean Spanish answer>",
+      "alternate_answers": ["<variant>"],
+      "concepts": ["<concept name>"]
     }
   ]
 }
 ```
 
-**Parser script:** `scripts/parse_transcripts.py`
-- Read each transcript file
-- Use regex or structured parsing to identify Q&A pairs
-- Handle multiple valid answers (separated by "/" in transcripts)
-- Handle teacher explanations between questions (skip these, they're context not Q&A)
-- Output clean JSON per track
+2. Validate all returned concept names against `CONCEPT_TAXONOMY`. Any unlisted name is logged for human review — the script does **not** silently create new concepts.
+3. Write output to `data/parsed/spanish/track_NN.json`.
 
-**Note:** The exact transcript format may vary. The parser should be tolerant of inconsistencies — some tracks may have longer teacher explanations, some may have the student making mistakes before arriving at the correct answer. The parser should extract the *final correct answer* for each question.
+**Taxonomy governance:** `CONCEPT_TAXONOMY` is a Python list constant hardcoded in `categorize.py`. To add a concept, edit the constant and re-run affected tracks. Concept names are stable identifiers — renaming requires a data migration.
 
-**Validation report (`parse_transcripts.py --validate`):**
+**Seeding concepts:** `seed_db.py` upserts concepts by exact `name` string.
 
-After parsing, the script must emit a validation report to stdout before exiting. Human review of this report is required before running `seed_db.py`. The report flags:
-
-- Tracks where the extracted question count is below a minimum threshold (flag any track with fewer than 3 questions — likely a parse failure)
-- Questions with empty `prompt` or `answer` fields
-- Tracks that failed entirely (no questions extracted)
-- Total questions per track (so you can spot outliers at a glance)
-
-Example output:
-```
-Parse summary: 90 tracks, 1,247 questions total
-  ⚠ Track 07: 1 question extracted (expected ≥3) — review manually
-  ✗ Track 34: 0 questions extracted — parse failure
-  OK 88 tracks passed
-```
-
-Do not proceed to `categorize.py` until all flagged tracks are resolved (either fixed in the parser or manually corrected in the JSON output).
-
-### 4.2 Concept categorization
-
-Use an LLM to batch-categorize questions into concept groups.
-
-**Script:** `scripts/categorize.py`
-
-**Approach:**
-1. Load all parsed Q&A pairs
-2. Send batches to the Anthropic API with a prompt like:
-
-```
-You are categorizing Spanish language learning questions by grammatical concept.
-
-Given these Q&A pairs from a Spanish course, identify the primary concept(s) each question tests. Use consistent concept names from this taxonomy:
-
-- Cognate conversion (-tion → -ción)
-- Cognate conversion (-ly → -mente)
-- Present tense: -ar verbs
-- Present tense: -er/-ir verbs
-- Irregular present tense
-- Infinitive constructions (querer + infinitive)
-- Reflexive verbs
-- Object pronouns (direct)
-- Object pronouns (indirect)
-- Possessives
-- Conditional tense
-- Past tense (preterite)
-- Past tense (imperfect)
-- Subjunctive
-- Ser vs estar
-- Por vs para
-- Prepositions
-- Question formation
-- Negation
-- [Add more as patterns emerge]
-
-For each question, return the concept name(s). If a question tests a concept not in the list, create a new descriptive name for it.
-
-Return JSON only.
-```
-
-3. The LLM returns concept tags per question
-4. Validate all returned concept names against the canonical taxonomy list (step 2). Any name not in the list is flagged for human review — the script does **not** silently create new concepts.
-5. Write back to the parsed JSON files with concept tags added
-
-**Taxonomy governance:** The taxonomy list in the prompt is the canonical source of truth. It is hardcoded in `scripts/categorize.py` as a Python list constant (`CONCEPT_TAXONOMY`). To add a new concept, a developer must edit that constant and re-run categorization for affected tracks. The LLM must never invent concept names autonomously — if a question genuinely tests an unlisted concept, the script logs it and a human decides whether to extend the taxonomy.
-
-**Seeding concepts:** `seed_db.py` upserts concepts by exact `name` string. Concept names are treated as stable identifiers — renaming one requires a data migration, not just an edit to the constant.
-
-**Output:** Updated JSON with concept tags:
-```json
-{
-  "order": 3,
-  "prompt": "How would you say \"I want to explain something to you\"?",
-  "answer": "Quiero explicarte algo",
-  "alternate_answers": ["Quiero explicar algo a ti"],
-  "concepts": ["Infinitive constructions", "Object pronouns (indirect)"]
-}
-```
+**On-the-fly question generation:** At seed time, `categorize.py` generates a solid question set per concept from the transcript content. If a user exhausts those questions and requests more, the quiz endpoint calls the Anthropic API to generate additional questions for that concept and saves them to the `questions` table with `generated_for_user_id` set. These are served only to that user.
 
 ### 4.3 Database seeding
 
@@ -460,7 +392,7 @@ Progress calculations: `correct` and `acceptable` both count as passing when com
 1. **Normalization:** Lowercase, collapse whitespace, strip leading/trailing punctuation. Apply to user answer and all canonical answers (primary + alternates).
 2. **Exact match:** Normalized user answer == any normalized canonical answer → `correct`.
 3. **Accent-only difference:** Strip all diacritics from both sides, re-check exact match → `acceptable` (log which accents were missing for the feedback message).
-4. **LLM evaluation fallback:** If steps 1–3 produce no match, call Claude Haiku with a structured prompt:
+4. **LLM evaluation fallback:** If steps 1–3 produce no match, call Claude Haiku:
 
 ```
 You are evaluating a Spanish language learning answer.
@@ -477,9 +409,9 @@ Is the student's answer:
 Return JSON only: {"state": "correct"|"acceptable"|"incorrect", "feedback": "<one sentence explaining the result>"}
 ```
 
-The `feedback` field from the LLM is returned to the frontend alongside the state and shown to the user. For exact/accent matches, generate the feedback string locally (no LLM call needed).
+The `feedback` field is returned to the frontend and shown to the user. For exact/accent matches, generate feedback locally — no LLM call needed.
 
-> **Why Haiku, not string matching alone:** Spanish allows significant surface variation in valid answers (pronoun clitic placement, object pronoun ordering). Levenshtein distance ≤ 2 will incorrectly accept "quiero" vs "quiera" (edit distance 1, different tense) — this is a correctness failure, not a typo. The LLM call is ~50ms and inexpensive at Haiku pricing.
+> **Why LLM fallback:** Spanish allows valid surface variation that string distance cannot handle (pronoun clitic placement, object pronoun ordering). Since Q&A is generated by the LLM with clean answers, exact match will cover most cases — the fallback fires rarely and only for genuinely ambiguous answers.
 
 **Question selection algorithm:**
 

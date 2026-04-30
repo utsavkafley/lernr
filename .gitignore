@@ -16,3 +16,6 @@ __pycache__/
 
 # Data (transcripts will be added manually)
 data/parsed/
+data/transcripts/spanish/
+data/raw_concepts*.json
+data/raw_concepts_raw.txt

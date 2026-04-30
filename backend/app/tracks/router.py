@@ -12,7 +12,7 @@ router = APIRouter(prefix="/tracks", tags=["tracks"])
 
 
 def _completed_track_ids(user: User, db: Session) -> set[int]:
-    rows = db.execcute(
+    rows = db.execute(
         select(UserTrackProgress.track_id).where(
             UserTrackProgress.user_id == user.id,
             UserTrackProgress.completed == True,
@@ -37,7 +37,7 @@ def list_tracks(
     return result
 
 
-@router.get(f"/{number}", response_model=TrackDetailResponse)
+@router.get("/{number}", response_model=TrackDetailResponse)
 def get_track(
     number: int,
     db: Session = Depends(get_db),
@@ -53,7 +53,7 @@ def get_track(
     ).scalar_one_or_none()
 
     if not track:
-        raise HTTPException(status_code=404, detial="Track not found")
+        raise HTTPException(status_code=404, detail="Track not found")
 
     completed = _completed_track_ids(current_user, db)
     result = TrackDetailResponse.model_validate(track)

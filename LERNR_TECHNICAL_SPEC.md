@@ -1,33 +1,20 @@
 # LERNR — Technical Specification
 
-A text-based companion app for Language Transfer's Complete Spanish course. LERNR parses LT transcripts into structured Q&A data, tracks user progress through the 90-track course, and provides an AI Socratic tutor that adapts practice sessions to the learner's weak spots.
+A text-based companion app for Language Transfer's Complete Spanish course. Parses LT transcripts into structured Q&A data, tracks user progress through 90 tracks, and provides an AI Socratic tutor that adapts practice to weak spots.
 
 ---
 
 ## 1. Project overview
 
-### What is Language Transfer?
-
-Language Transfer (LT) is a free audio course that teaches languages using the Thinking Method — a Socratic approach where the teacher asks guiding questions and the student pauses to construct answers by thinking through patterns, not memorizing. Complete Spanish has 90 audio tracks (~10-15 minutes each) covering the full structural panorama of the language.
-
-The transcripts follow a consistent format: the teacher poses a question (e.g., "How would you say 'I want to explain something to you'?"), there's a pause for the student to think, and then the student answers. The method emphasizes understanding *why* Spanish works the way it does, not rote memorization.
-
-### What is LERNR?
-
-LERNR is a web app that transforms LT's transcript content into an interactive, text-based practice tool. It:
+LERNR is a web app that transforms LT's transcript content into an interactive practice tool:
 
 1. **Parses** the 90 LT Spanish transcripts into structured Q&A pairs
-2. **Categorizes** each question by the grammatical/linguistic concept it teaches
-3. **Tracks** the user's progress — which tracks they've completed, which concepts they've mastered, where they struggle
-4. **Quizzes** the user with questions from their completed tracks, weighted toward weak concepts
-5. **Provides an AI tutor** that uses the Socratic method (mirroring LT's approach) to guide the user through concepts they're struggling with, rather than just giving answers
+2. **Categorizes** each question by grammatical/linguistic concept
+3. **Tracks** the user's progress — completed tracks, mastered concepts, weak spots
+4. **Quizzes** the user with questions weighted toward weak concepts
+5. **Provides an AI tutor** that uses the Socratic method to guide users through struggling concepts
 
-### Design philosophy
-
-- **Text-first.** No audio playback — LT already does that. LERNR is for practice and reinforcement.
-- **Iterative.** Each phase produces a usable product. Features are additive, not dependent.
-- **Honest feedback.** Progress tracking shows real mastery, not gamified streaks. If you're weak on conditional tense, you see that clearly.
-- **Socratic AI.** The tutor never gives the answer directly. It guides the user to construct it, the same way Mihalis does in the audio.
+**Design philosophy:** Text-first, iterative, honest feedback (real mastery not streaks), Socratic AI that never gives answers directly.
 
 ---
 
@@ -35,693 +22,180 @@ LERNR is a web app that transforms LT's transcript content into an interactive, 
 
 ### Tech stack
 
-| Layer | Technology | Rationale |
-|-------|-----------|-----------|
-| Frontend | Vue.js 3 + TypeScript + Vite | Matches resume stack; Composition API for clean state management |
-| Backend | Python + FastAPI | Async-native, clean typing, pairs well with LangGraph |
-| Database | PostgreSQL | Relational data with clear FK relationships; SQLAlchemy ORM |
-| AI Agent | LangGraph (Python) | StateGraph for Socratic conversation flow; tool-calling for progress lookups |
-| Auth | JWT (python-jose + passlib) | Stateless, simple, no session management needed |
-| Deployment | Docker Compose (dev) → AWS ECS + RDS (prod) | Local parity with production; GitHub Actions CI/CD |
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Vue.js 3 + TypeScript + Vite |
+| Backend | Python + FastAPI |
+| Database | PostgreSQL (SQLAlchemy ORM) |
+| AI Agent | LangGraph (Python) |
+| Auth | JWT (python-jose + passlib) |
+| Deployment | Docker Compose (dev) → AWS ECS + RDS (prod) |
 
 ### Project structure
 
 ```
 lernr/
-├── README.md
-├── docker-compose.yml
-├── .github/
-│   └── workflows/
-│       └── ci.yml
 ├── data/
-│   ├── transcripts/          # Raw LT transcript files (1 per track)
-│   └── parsed/               # Output from parser: structured JSON
+│   ├── transcripts/          # Raw LT transcript files
+│   └── parsed/               # Structured JSON per track
 ├── scripts/
-│   ├── parse_transcripts.py  # Phase 0: transcript → structured Q&A JSON
-│   ├── categorize.py         # Phase 0: LLM-based concept tagging
-│   └── seed_db.py            # Phase 0: load parsed data into PostgreSQL
+│   ├── parse_transcripts.py  # Transcript splitting (done)
+│   ├── categorize.py         # LLM-based Q&A extraction + concept tagging (done)
+│   └── seed_db.py            # Load parsed data into PostgreSQL (done)
 ├── backend/
-│   ├── Dockerfile
-│   ├── requirements.txt
 │   ├── app/
-│   │   ├── main.py           # FastAPI app entry point
-│   │   ├── config.py         # Settings, env vars
-│   │   ├── database.py       # SQLAlchemy engine + session
-│   │   ├── models.py         # SQLAlchemy ORM models
-│   │   ├── schemas.py        # Pydantic request/response schemas
-│   │   ├── auth/
-│   │   │   ├── router.py     # /auth/register, /auth/login
-│   │   │   ├── utils.py      # JWT creation, password hashing
-│   │   │   └── dependencies.py  # get_current_user dependency
-│   │   ├── tracks/
-│   │   │   └── router.py     # /tracks, /tracks/{id}/questions
-│   │   ├── progress/
-│   │   │   └── router.py     # /progress, /progress/concepts
-│   │   ├── quiz/
-│   │   │   └── router.py     # /quiz/next, /quiz/submit
-│   │   └── agent/
-│   │       ├── router.py     # /agent/chat (SSE streaming)
-│   │       ├── graph.py      # LangGraph StateGraph definition
-│   │       └── tools.py      # Agent tools: get_progress, get_weak_concepts, etc.
+│   │   ├── main.py
+│   │   ├── config.py
+│   │   ├── models.py
+│   │   ├── schemas.py
+│   │   ├── auth/             # /auth/register, /auth/login, /auth/me
+│   │   ├── tracks/           # /tracks, /tracks/{number}
+│   │   ├── progress/         # /progress/summary, /progress/concepts
+│   │   ├── quiz/             # /quiz/next, /quiz/submit
+│   │   └── agent/            # /agent/chat (SSE) — Phase 3
 │   └── tests/
-│       ├── conftest.py
-│       ├── test_auth.py
-│       ├── test_tracks.py
-│       ├── test_progress.py
-│       ├── test_quiz.py
-│       └── test_agent.py
-├── frontend/
-│   ├── Dockerfile
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── vite.config.ts
-│   ├── index.html
-│   └── src/
-│       ├── main.ts
-│       ├── App.vue
-│       ├── router/
-│       │   └── index.ts
-│       ├── stores/
-│       │   ├── auth.ts       # Pinia store for auth state
-│       │   ├── tracks.ts     # Pinia store for track/progress data
-│       │   └── quiz.ts       # Pinia store for quiz session state
-│       ├── composables/
-│       │   ├── useApi.ts     # Axios instance with JWT interceptor
-│       │   └── useStream.ts  # SSE streaming composable for agent chat
-│       ├── views/
-│       │   ├── LoginView.vue
-│       │   ├── TracksView.vue
-│       │   ├── PracticeView.vue
-│       │   ├── ProgressView.vue
-│       │   └── TutorView.vue
-│       ├── components/
-│       │   ├── TrackCard.vue
-│       │   ├── QuestionCard.vue
-│       │   ├── ConceptBadge.vue
-│       │   ├── ProgressChart.vue
-│       │   └── ChatMessage.vue
-│       └── styles/
-│           └── main.css
-└── docs/
-    └── TECHNICAL_SPEC.md     # This document
+└── frontend/                 # Phase 2
 ```
 
 ---
 
 ## 3. Data model
 
-### Entity relationship
-
 ```
 users
-  ├── user_track_progress (1:many)
-  │     └── tracks (many:1)
-  └── attempts (1:many)
-        └── questions (many:1)
-              ├── tracks (many:1)
-              └── question_concepts (many:many)
-                    └── concepts (many:1)
+  ├── user_track_progress (1:many) → tracks
+  └── attempts (1:many) → questions
+        ├── tracks
+        └── question_concepts (many:many) → concepts
 ```
 
-### Tables
+| Table | Key columns |
+|-------|------------|
+| `users` | id (UUID), email, username, password_hash |
+| `tracks` | id, number (1-90), title, description |
+| `concepts` | id, name, description, first_track |
+| `questions` | id, track_id, prompt, answer, alternate_answers (TEXT[]), order_in_track |
+| `question_concepts` | question_id, concept_id (composite PK) |
+| `user_track_progress` | user_id, track_id, completed, completed_at |
+| `attempts` | id, user_id, question_id, user_answer, evaluation_state, created_at |
 
-#### `users`
-| Column | Type | Notes |
-|--------|------|-------|
-| id | UUID | PK, default uuid4 |
-| email | VARCHAR(255) | Unique, indexed |
-| username | VARCHAR(100) | Optional display name; used by the AI tutor to address the user |
-| password_hash | VARCHAR(255) | bcrypt |
-| created_at | TIMESTAMP | Default now() |
-
-#### `tracks`
-| Column | Type | Notes |
-|--------|------|-------|
-| id | SERIAL | PK |
-| number | INTEGER | 1-90, unique, indexed |
-| title | VARCHAR(255) | e.g., "Track 01", "Track 45" |
-| description | TEXT | Optional summary of what the track covers |
-
-#### `concepts`
-| Column | Type | Notes |
-|--------|------|-------|
-| id | SERIAL | PK |
-| name | VARCHAR(255) | e.g., "Cognate conversion: -tion → -ción" |
-| description | TEXT | Explanation of the concept |
-| first_track | INTEGER | FK → tracks.number. The track where this concept is first introduced |
-
-#### `questions`
-| Column | Type | Notes |
-|--------|------|-------|
-| id | SERIAL | PK |
-| track_id | INTEGER | FK → tracks.id |
-| prompt | TEXT | The teacher's question, in English |
-| answer | TEXT | The canonical expected Spanish answer |
-| alternate_answers | TEXT[] | Additional accepted forms |
-| order_in_track | INTEGER | Position within the track (1-indexed) |
-| generated_for_user_id | UUID | Nullable FK → users.id. NULL = seeded question available to all users. Set = generated on-the-fly for a specific user who exhausted the seeded pool. |
-
-#### `question_concepts` (join table)
-| Column | Type | Notes |
-|--------|------|-------|
-| question_id | INTEGER | FK → questions.id |
-| concept_id | INTEGER | FK → concepts.id |
-| | | Composite PK (question_id, concept_id) |
-
-#### `user_track_progress`
-| Column | Type | Notes |
-|--------|------|-------|
-| id | SERIAL | PK |
-| user_id | UUID | FK → users.id |
-| track_id | INTEGER | FK → tracks.id |
-| completed | BOOLEAN | Whether the user has listened to/completed this track |
-| completed_at | TIMESTAMP | Nullable |
-| | | Unique constraint on (user_id, track_id) |
-
-#### `attempts`
-| Column | Type | Notes |
-|--------|------|-------|
-| id | SERIAL | PK |
-| user_id | UUID | FK → users.id |
-| question_id | INTEGER | FK → questions.id |
-| user_answer | TEXT | What the user typed |
-| evaluation_state | VARCHAR(20) | `correct`, `acceptable`, or `incorrect` (see answer validation spec in §5.4) |
-| created_at | TIMESTAMP | Default now(), indexed |
----
-
-## 4. Phase 0 — Data pipeline
-
-### 4.0 Database migrations (Alembic)
-
-Set up Alembic before any other Phase 0 work. All schema changes must go through migration files — never hand-edit a live database.
-
-```
-backend/
-├── alembic.ini
-├── alembic/
-│   ├── env.py          # Reads DATABASE_URL from config; uses SQLAlchemy metadata
-│   └── versions/       # Auto-generated migration files
-```
-
-**Commands:**
-- `alembic revision --autogenerate -m "initial schema"` — generate migration from models
-- `alembic upgrade head` — apply all pending migrations
-- `seed_db.py` always runs *after* `alembic upgrade head`
-
-The Docker Compose backend entrypoint should run `alembic upgrade head` before starting uvicorn so dev and prod environments are always in sync.
-
-### 4.1 Transcript splitting
-
-**Script:** `scripts/split_transcripts.py` (already complete)
-
-**Input:** `data/transcripts/Spanish_Transcript_All_Tracks.pdf`
-
-**Output:** One raw text file per track in `data/transcripts/spanish/track_02.txt` … `track_90.txt`. Track 01 is intro-only with no Q&A and is skipped in all subsequent steps.
-
-The regex parser approach (`parse_transcripts.py`) was prototyped and abandoned — regex cannot reliably distinguish correct answers from wrong student attempts, or Spanish-practice exchanges from English metalanguage exchanges. Extraction is handled by the LLM in §4.2.
-
-### 4.2 Concept categorization and Q&A extraction
-
-**Script:** `scripts/categorize.py`
-
-**Input:** Raw track text files from `data/transcripts/spanish/`
-
-**One LLM call per track.** The LLM reads the full transcript in order — giving it the same context a human reviewer has — and simultaneously extracts clean Q&A pairs and tags each with concepts. This resolves what regex cannot: wrong student attempts vs. confirmed answers, English metalanguage exchanges vs. Spanish practice prompts, and self-corrections mid-exchange.
-
-**Approach:**
-1. For each track text file, send the full raw text to the Anthropic API with a prompt like:
-
-```
-You are processing a Language Transfer Complete Spanish transcript.
-
-Read this transcript in full and return two things:
-
-1. The Spanish language concepts taught in this track. Use names from this taxonomy:
-   [CONCEPT_TAXONOMY list]
-   If a concept is genuinely not in the list, flag it — do not invent a name.
-
-2. Clean Q&A pairs for every exchange where the student constructs a Spanish answer.
-   Rules:
-   - Use the final confirmed-correct Spanish answer, not wrong attempts.
-   - Skip exchanges where the student answers in English (vocabulary translation,
-     metalanguage questions like "what do you notice?").
-   - If the student gives gender variants (e.g. "listo / lista"), include the
-     masculine form as the answer and feminine as an alternate.
-   - Strip verbal filler from answers ("or...", "I think...", trailing "?").
-   - Tag each Q&A pair with the relevant concept(s) from the list above.
-
-Return JSON only:
-{
-  "track_number": <int>,
-  "questions": [
-    {
-      "order": <int>,
-      "prompt": "<teacher question>",
-      "answer": "<clean Spanish answer>",
-      "alternate_answers": ["<variant>"],
-      "concepts": ["<concept name>"]
-    }
-  ]
-}
-```
-
-2. Validate all returned concept names against `CONCEPT_TAXONOMY`. Any unlisted name is logged for human review — the script does **not** silently create new concepts.
-3. Write output to `data/parsed/spanish/track_NN.json`.
-
-**Taxonomy governance:** `CONCEPT_TAXONOMY` is a Python list constant hardcoded in `categorize.py`. To add a concept, edit the constant and re-run affected tracks. Concept names are stable identifiers — renaming requires a data migration.
-
-**Seeding concepts:** `seed_db.py` upserts concepts by exact `name` string.
-
-**On-the-fly question generation:** At seed time, `categorize.py` generates a solid question set per concept from the transcript content. If a user exhausts those questions and requests more, the quiz endpoint calls the Anthropic API to generate additional questions for that concept and saves them to the `questions` table with `generated_for_user_id` set. These are served only to that user.
-
-### 4.3 Database seeding
-
-**Script:** `scripts/seed_db.py`
-- Read all parsed + categorized JSON files
-- Create track records (1-90)
-- Create concept records (deduplicated from all questions)
-- Create question records with FK to track
-- Create question_concept join records
-- Idempotent — can be re-run safely (upsert logic)
+`evaluation_state`: `correct`, `acceptable`, or `incorrect`. Both `correct` and `acceptable` count as passing in accuracy calculations.
 
 ---
 
-## 5. Phase 1 — Backend API
+## 4. Phase 0 — Data pipeline ✅
 
-### 5.0 Cross-cutting concerns (wire up on Day 1)
+- **`categorize.py`** — One Claude Sonnet call per track. Extracts clean Q&A pairs and tags concepts in a single pass. Validates all concept names against `CONCEPT_TAXONOMY` hardcoded in the script.
+- **`seed_db.py`** — Idempotent upsert of 89 tracks, 331 concepts, 2171 questions.
 
-**CORS (`main.py`):**
-FastAPI does not enable CORS by default. The frontend origin must be explicitly allowlisted, and SSE endpoints require it.
+---
 
-```python
-from fastapi.middleware.cors import CORSMiddleware
+## 5. Phase 1 — Backend API ✅
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,   # e.g. ["http://localhost:3000"] in dev
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-```
+### Endpoints
 
-`CORS_ORIGINS` is an env var (comma-separated list). In production this is the CloudFront distribution URL.
+| Method | Path | Auth |
+|--------|------|------|
+| POST | `/auth/register` | — |
+| POST | `/auth/login` | — |
+| GET | `/auth/me` | JWT |
+| GET | `/tracks` | JWT |
+| GET | `/tracks/{number}` | JWT |
+| POST | `/progress/tracks/{number}/complete` | JWT |
+| DELETE | `/progress/tracks/{number}/complete` | JWT |
+| GET | `/progress/summary` | JWT |
+| GET | `/progress/concepts` | JWT |
+| GET | `/progress/weak-concepts` | JWT |
+| GET | `/quiz/next` | JWT |
+| POST | `/quiz/submit` | JWT |
 
-**Rate limiting:**
-Use `slowapi` (FastAPI-native). Apply limits to all mutating and expensive endpoints — not just auth:
+### Quiz constants (`config.py`)
 
-| Endpoint | Limit |
-|----------|-------|
-| `POST /auth/register` | 5/minute per IP |
-| `POST /auth/login` | 10/minute per IP |
-| `POST /quiz/submit` | 60/minute per user |
-| `POST /agent/chat` | 20/minute per user |
+| Constant | Default | Purpose |
+|----------|---------|---------|
+| `mastery_threshold` | 0.70 | Below this = weak concept |
+| `recent_attempt_window` | 10 | Questions to exclude as "recently seen" |
+| `min_pool_size` | 3 | Minimum pool before relaxing recency filter |
 
-**JWT security note:**
-Tokens are stored in `localStorage` on the frontend (XSS-accessible). This is an accepted MVP tradeoff — document it in the README as a known limitation. The mitigation for a future hardening pass is HttpOnly cookies + CSRF tokens. Do not silently deploy to production without this note visible.
+### Answer validation pipeline
 
-### 5.1 Auth endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/auth/register` | Create user account. Body: `{ email, password, username? }`. Returns JWT. |
-| POST | `/auth/login` | Authenticate. Body: `{ email, password }`. Returns JWT. |
-| GET | `/auth/me` | Get current user info. Requires JWT. |
-
-JWT tokens should have a reasonable expiry (e.g., 7 days). Use `python-jose` for encoding/decoding, `passlib[bcrypt]` for password hashing.
-
-### 5.2 Track endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/tracks` | List all 90 tracks with user's completion status. Requires JWT. |
-| GET | `/tracks/{number}` | Get track details + all questions for that track. |
-| GET | `/tracks/{number}/questions` | Get just the questions for a track. |
-
-### 5.3 Progress endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/progress/tracks/{number}/complete` | Mark a track as completed. |
-| DELETE | `/progress/tracks/{number}/complete` | Unmark a track as completed. |
-| GET | `/progress/summary` | Overall progress: tracks completed, concept accuracy breakdown. |
-| GET | `/progress/concepts` | Per-concept accuracy stats (total attempts, correct, accuracy %). |
-| GET | `/progress/weak-concepts` | Concepts below `MASTERY_THRESHOLD` (70%), sorted by accuracy ascending. |
-
-### 5.4 Quiz endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/quiz/next` | Get the next question to practice. Weighted toward weak concepts from completed tracks only. |
-| POST | `/quiz/submit` | Submit an answer. Body: `{ question_id, user_answer }`. Returns `{ evaluation_state, feedback, expected_answer }`. |
-
-**Answer validation — 3-state result:**
-
-Every quiz submission returns one of three states:
-
-| State | Meaning | Stored as |
-|-------|---------|-----------|
-| `correct` | Exact match (after normalization) or matches an alternate answer | `correct` |
-| `acceptable` | Minor surface error only — missing accent, trivial typo that doesn't change meaning | `acceptable` |
-| `incorrect` | Wrong word, wrong tense, wrong structure, or missing key element | `incorrect` |
-
-Progress calculations: `correct` and `acceptable` both count as passing when computing per-concept accuracy. The frontend should visually distinguish them ("✓ Correct" vs "~ Close — watch your accents").
-
-**Validation pipeline (applied in order, stop at first match):**
-
-1. **Normalization:** Lowercase, collapse whitespace, strip leading/trailing punctuation. Apply to user answer and all canonical answers (primary + alternates).
-2. **Exact match:** Normalized user answer == any normalized canonical answer → `correct`.
-3. **Accent-only difference:** Strip all diacritics from both sides, re-check exact match → `acceptable` (log which accents were missing for the feedback message).
-4. **LLM evaluation fallback:** If steps 1–3 produce no match, call Claude Haiku:
-
-```
-You are evaluating a Spanish language learning answer.
-Question: {prompt}
-Expected answer: {answer}
-Alternate accepted answers: {alternate_answers}
-Student's answer: {user_answer}
-
-Is the student's answer:
-- "correct": semantically equivalent and grammatically correct
-- "acceptable": minor surface error only (missing accent, trivial spelling mistake that doesn't change meaning)
-- "incorrect": wrong word, wrong tense, wrong structure, or missing a required element
-
-Return JSON only: {"state": "correct"|"acceptable"|"incorrect", "feedback": "<one sentence explaining the result>"}
-```
-
-The `feedback` field is returned to the frontend and shown to the user. For exact/accent matches, generate feedback locally — no LLM call needed.
-
-> **Why LLM fallback:** Spanish allows valid surface variation that string distance cannot handle (pronoun clitic placement, object pronoun ordering). Since Q&A is generated by the LLM with clean answers, exact match will cover most cases — the fallback fires rarely and only for genuinely ambiguous answers.
-
-**Question selection algorithm:**
-
-Constants (defined in `backend/app/config.py`, not scattered inline):
-- `MASTERY_THRESHOLD = 0.70` — concepts below this accuracy are considered weak
-- `RECENT_ATTEMPT_WINDOW = 10` — how many recent attempts to exclude from "already seen"
-- `MIN_POOL_SIZE = 3` — minimum question pool size before relaxing filters
-
-Steps (applied in order):
-
-1. Filter to questions from the user's completed tracks only.
-2. Calculate per-concept accuracy from the user's attempt history. Accuracy = (`correct` + `acceptable` attempts) / total attempts for that concept.
-3. Weight concepts inversely by accuracy (weaker concepts get more questions). Concepts with no attempt history are treated as 0% accuracy (highest priority).
-4. Within the selected concept, filter out questions answered correctly in the last `RECENT_ATTEMPT_WINDOW` attempts.
-5. **Pool size guard:** If the filtered pool has fewer than `MIN_POOL_SIZE` questions, relax the recency filter entirely (show any question from the concept). If the pool is still empty (the concept only has 1 question in completed tracks), fall back to the next weakest concept.
-6. Pick randomly from the remaining pool (do not always pick the same question for a given concept).
-7. **New user fallback:** If the user has no attempt history at all, serve questions sequentially from their earliest completed track (no weighting needed yet).
-
-### 5.5 Agent endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/agent/chat` | Start or continue a Socratic tutoring session. Body: `{ message, session_id? }`. Returns SSE stream. |
-
-Detailed in Phase 3 (Section 7).
+1. Normalize (lowercase, strip whitespace)
+2. Exact match → `correct`
+3. Accent-strip both sides → match → `acceptable`
+4. Claude Haiku fallback → `correct` / `acceptable` / `incorrect`
 
 ---
 
 ## 6. Phase 2 — Frontend
 
-### 6.1 Views
+### Views
 
-**Login / Register (`LoginView.vue`)**
-- Simple email + password form
-- Toggle between login and register modes
-- Store JWT in localStorage, redirect to tracks on success
+| View | Purpose |
+|------|---------|
+| `LoginView.vue` | Email/password, toggle register/login, JWT to localStorage |
+| `TracksView.vue` | Grid of 90 tracks with completion toggles |
+| `PracticeView.vue` | Quiz loop: question → answer input → result → next |
+| `ProgressView.vue` | Overall stats + concept mastery breakdown (green/yellow/red) |
+| `TutorView.vue` | SSE chat interface for Socratic tutor |
 
-**Track Browser (`TracksView.vue`)**
-- Grid or list of all 90 tracks
-- Each track shows: number, title, completion status (checkbox or toggle)
-- Clicking a track's completion toggle calls `POST /progress/tracks/{number}/complete`
-- Visual distinction between completed and uncompleted tracks
-- Optional: group tracks by concept cluster or show which concepts each track introduces
+### State (Pinia stores)
 
-**Practice Mode (`PracticeView.vue`)**
-- The core learning loop
-- Shows one question at a time from `GET /quiz/next`
-- Displays the prompt (in English)
-- Text input for the user's Spanish answer
-- On submit: calls `POST /quiz/submit`, shows result (correct/incorrect + expected answer)
-- Shows the concept(s) being tested as small badges
-- "Next" button to load the next question
-- Running session stats: questions answered, accuracy this session
+- **`auth`** — JWT token, user info
+- **`tracks`** — track list + completion statuses
+- **`quiz`** — current question, session stats
 
-**Progress Dashboard (`ProgressView.vue`)**
-- Overall stats: total tracks completed (X/90), total questions practiced, overall accuracy
-- Concept mastery breakdown: list of concepts with accuracy percentages
-- Visual indicators: green (≥80%), yellow (50-79%), red (<50%)
-- Weak spots section: concepts that need the most work, sorted by accuracy ascending
+### API layer
 
-**Socratic Tutor (`TutorView.vue`)**
-- Chat interface for interacting with the AI tutor
-- Messages stream in via SSE
-- The tutor starts by identifying a weak concept and begins a Socratic dialogue
-- User types responses, the tutor guides them through the pattern
-- Conversation history persisted in component state (not in DB for MVP)
-
-### 6.2 State management (Pinia)
-
-**`auth` store:** JWT token, user info, login/logout actions
-
-**`tracks` store:** Track list, completion statuses, actions for toggling completion
-
-**`quiz` store:** Current question, session stats (questions answered, correct count), submit action
-
-### 6.3 API layer
-
-**`useApi.ts` composable:**
-- Axios instance with `baseURL` pointing to the backend
-- Request interceptor that attaches the JWT from the auth store
-- Response interceptor that handles 401s (redirect to login)
-
-**`useStream.ts` composable:**
-- Wraps `EventSource` or `fetch` with SSE parsing for the agent chat endpoint
-- Exposes reactive `messages` array and `isStreaming` boolean
-- Handles reconnection and error states
-
-### 6.4 Design direction
-
-- Clean, minimal UI — no gamification, no mascots
-- Responsive but desktop-first (this is a study tool, most users will be at a desk)
-- Typography-forward: clear hierarchy, readable at a glance
-- Color coding for concept mastery (green/yellow/red) should be the main visual accent
+- **`useApi.ts`** — Axios instance with JWT interceptor, 401 → redirect to login
+- **`useStream.ts`** — SSE composable for agent chat (reactive `messages`, `isStreaming`)
 
 ---
 
 ## 7. Phase 3 — AI Socratic tutor
 
-### 7.0 State persistence (critical — configure before building the graph)
+LangGraph `StateGraph` with Postgres checkpointer (`langgraph-checkpoint-postgres`) for persistent conversation state across sessions.
 
-LangGraph's default checkpointer is **in-memory**, which means conversation state is lost on server restart and cannot be shared across multiple ECS instances. Use `langgraph-checkpoint-postgres` from the start:
+### State
 
-```python
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
-async def create_graph():
-    async with AsyncPostgresSaver.from_conn_string(settings.DATABASE_URL) as checkpointer:
-        await checkpointer.setup()   # Creates checkpoint tables if they don't exist
-        graph = workflow.compile(checkpointer=checkpointer)
-        return graph
-```
-
-The checkpointer uses the same PostgreSQL database as the rest of the app. Alembic does **not** manage the checkpoint tables — `checkpointer.setup()` handles that. This means conversation history is automatically persisted across sessions for free, so "conversation history not persisted in DB for MVP" is no longer a limitation.
-
-### 7.1 Agent design
-
-The agent is a LangGraph `StateGraph` that manages a Socratic tutoring conversation. It mirrors the Language Transfer method: guide the student to construct the answer through a series of smaller questions, never give the answer directly.
-
-**State schema:**
 ```python
 class TutorState(TypedDict):
-    messages: list          # Conversation history
-    target_concept: str     # The concept being practiced
-    target_question: dict   # The full Q&A pair being worked toward
-    hint_level: int         # 0 = no hints, 1 = gentle nudge, 2 = strong hint, 3 = reveal
-    user_id: str            # For progress lookups
+    messages: list
+    target_concept: str
+    target_question: dict
+    hint_level: int          # 0–3; 3 = reveal answer
+    user_id: str
 ```
 
-**Graph nodes:**
+### Graph nodes
 
-1. **`select_concept`** — Entry node. Calls `get_weak_concepts` tool to find the user's weakest concept. Picks a question from that concept. Sets `target_question` in state.
+1. **`select_concept`** — picks weakest concept via `get_weak_concepts` tool
+2. **`ask_question`** — Socratic question, broken into sub-steps if hint_level > 0
+3. **`evaluate_response`** — correct → `reinforce`, incorrect → `give_hint`
+4. **`give_hint`** — calibrated to hint_level (nudge → simpler example → reveal)
+5. **`reinforce`** — follow-up on same concept; after 3+ correct, switch concept
 
-2. **`ask_question`** — Formulates a Socratic question. If `hint_level` is 0, asks the full question. If higher, breaks it into smaller steps.
+### Tools
 
-3. **`evaluate_response`** — Evaluates the user's answer against the expected answer. Branches:
-   - Correct → go to `reinforce` (praise briefly, then ask a harder follow-up from the same concept)
-   - Incorrect → increment `hint_level`, go to `give_hint`
-   - Close but not exact → acknowledge what's right, point out what's off, stay at same `hint_level`
+- `get_weak_concepts(user_id)` — concepts sorted by accuracy ascending
+- `get_concept_questions(concept_name, user_id)` — questions from completed tracks
+- `get_user_progress(user_id)` — overall summary
+- `record_attempt(user_id, question_id, evaluation_state)` — persist session attempts
 
-4. **`give_hint`** — Provides a hint calibrated to `hint_level`:
-   - Level 1: Remind them of the relevant pattern ("Remember, for -ar verbs in the conditional, what ending do we add to the infinitive?")
-   - Level 2: Give a simpler example first ("Let's start simpler. How do you say 'to speak'?")
-   - Level 3: Reveal the answer and explain the pattern, then move to a new question on the same concept
+### Endpoint
 
-5. **`reinforce`** — The user got it right. Ask a follow-up that tests the same concept at the same or slightly harder difficulty. If they've gotten 3+ correct in a row on this concept, switch to a new weak concept.
-
-**Edges:**
-```
-select_concept → ask_question
-ask_question → (wait for user input)
-evaluate_response → reinforce (if correct)
-evaluate_response → give_hint (if incorrect)
-give_hint → ask_question (loop back with hint context)
-reinforce → ask_question (new question, same or new concept)
-```
-
-### 7.2 Agent tools
-
-```python
-@tool
-def get_weak_concepts(user_id: str) -> list[dict]:
-    """Returns the user's weakest concepts, sorted by accuracy ascending.
-    Each entry has: concept_name, accuracy_pct, total_attempts."""
-
-@tool
-def get_concept_questions(concept_name: str, user_id: str) -> list[dict]:
-    """Returns questions for a given concept from the user's completed tracks.
-    Excludes questions answered correctly in the last 5 attempts."""
-
-@tool
-def get_user_progress(user_id: str) -> dict:
-    """Returns overall progress summary: tracks_completed, total_attempts,
-    overall_accuracy, concepts_mastered, concepts_struggling."""
-
-@tool
-def record_attempt(user_id: str, question_id: int, evaluation_state: str) -> None:
-    """Records a practice attempt from the tutoring session.
-    evaluation_state must be 'correct', 'acceptable', or 'incorrect'."""
-```
-
-### 7.3 System prompt for the agent
-
-```
-You are a Spanish language tutor that uses the Socratic method — the same approach
-used by Language Transfer's Thinking Method. Your role is to guide the student to
-construct Spanish sentences by thinking through patterns, never by memorizing.
-
-Core principles:
-- NEVER give the answer directly. Ask guiding questions that lead the student to it.
-- Build on what the student already knows. Start from simpler forms and build up.
-- When the student makes a mistake, don't say "wrong." Ask a question that helps
-  them see why their answer doesn't work.
-- Keep responses short and focused. One question at a time.
-- Celebrate when they get it right, briefly, then move on.
-- Use the student's progress data to focus on concepts they struggle with.
-
-You have tools to look up the student's progress, find questions they need practice
-on, and record their attempts. Use them to personalize the session.
-
-When starting a session, identify a weak concept and begin with a question from that
-concept area. If the student is new with no attempt history, start with early-track
-concepts.
-
-Speak in English when explaining or asking questions. The student's answers will be
-in Spanish. You may use Spanish words when demonstrating patterns.
-```
-
-### 7.4 Streaming integration and session lifecycle
-
-**Session lifecycle:**
-
-| Step | Who | How |
-|------|-----|-----|
-| Start a new session | Frontend | Sends `POST /agent/chat` with no `session_id`. Backend generates a UUID, returns it in the first SSE event as `{ "type": "session_start", "session_id": "<uuid>" }`. Frontend stores this in the `quiz` Pinia store. |
-| Continue a session | Frontend | Sends `POST /agent/chat` with the stored `session_id`. Backend resumes the LangGraph thread from the checkpointed state. |
-| Session expiry | N/A | Sessions do not expire automatically — the checkpointer retains state indefinitely. Users can always resume a previous conversation. |
-| New session | Frontend | User clicks "New Session" — frontend clears the stored `session_id` and sends the next request without one. |
-
-The `thread_id` passed to LangGraph is `f"{user.id}:{session_id}"` — namespaced by user so one user can never resume another's session even if they guess the UUID.
-
-**SSE implementation:**
-
-```python
-@router.post("/agent/chat")
-async def chat(request: ChatRequest, user: User = Depends(get_current_user)):
-    session_id = request.session_id or str(uuid4())
-    thread_id = f"{user.id}:{session_id}"
-
-    async def event_generator():
-        if not request.session_id:
-            # Signal the frontend to save the new session ID
-            yield f"data: {json.dumps({'type': 'session_start', 'session_id': session_id})}\n\n"
-
-        async for event in graph.astream(
-            {"messages": request.messages, "user_id": str(user.id)},
-            config={"configurable": {"thread_id": thread_id}}
-        ):
-            yield f"data: {json.dumps(event)}\n\n"
-
-        yield "data: [DONE]\n\n"
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
-```
-
-The frontend's `useStream.ts` composable must handle three event types: `session_start`, regular content chunks, and the `[DONE]` sentinel.
+`POST /agent/chat` — SSE stream. `session_id` in body; generated on first call, stored by frontend. Thread ID namespaced as `{user_id}:{session_id}`.
 
 ---
 
-## 8. Phase 4 — Polish and deployment
+## 8. Phase 4 — Deployment
 
-### 8.1 Docker Compose (local dev)
+- **Dev:** Docker Compose (postgres + backend + frontend). Backend entrypoint runs `alembic upgrade head` before uvicorn.
+- **Prod:** AWS ECS (Fargate) + RDS (PostgreSQL) + S3/CloudFront (frontend). Secrets via AWS Secrets Manager.
 
-```yaml
-services:
-  db:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: lernr
-      POSTGRES_USER: lernr
-      POSTGRES_PASSWORD: lernr_dev
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
+### Checklist
 
-  backend:
-    build: ./backend
-    ports:
-      - "8000:8000"
-    environment:
-      DATABASE_URL: postgresql://lernr:lernr_dev@db:5432/lernr
-      JWT_SECRET: dev-secret-change-in-prod
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      CORS_ORIGINS: http://localhost:3000
-    # Entrypoint runs migrations before starting the server:
-    # alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000
-    depends_on:
-      - db
-
-  frontend:
-    build: ./frontend
-    ports:
-      - "3000:3000"
-    environment:
-      VITE_API_URL: http://localhost:8000
-
-volumes:
-  pgdata:
-```
-
-### 8.2 CI/CD (GitHub Actions)
-
-- On push to `main`: run backend tests (pytest), run frontend build (vite build), lint both
-- On tag: build Docker images, push to ECR, deploy to ECS
-
-### 8.3 Production deployment
-
-- **AWS ECS** (Fargate) for backend container
-- **AWS RDS** (PostgreSQL) for database
-- **S3 + CloudFront** for frontend static assets
-- **Nginx** as reverse proxy in the backend container
-- Environment variables managed via AWS Secrets Manager
-
-### 8.4 Polish checklist
-
-- [ ] Responsive layout (mobile-friendly practice mode)
-- [ ] Loading skeletons for async data
-- [ ] Error boundaries and user-friendly error messages
-- [ ] Input validation (frontend + backend)
-- [ ] Rate limiting — already specced in §5.0; verify limits are tuned in prod
-- [ ] Clean README with screenshots, setup instructions, architecture diagram
-- [ ] README security note: document JWT-in-localStorage as a known MVP limitation; link to future hardening plan (HttpOnly cookies + CSRF)
-- [ ] Audit `MASTERY_THRESHOLD`, `RECENT_ATTEMPT_WINDOW`, `MIN_POOL_SIZE` constants in `config.py` before prod — tune based on real usage data
+- [ ] Rate limiting (slowapi): register 5/min, login 10/min, quiz submit 60/min, agent 20/min
+- [ ] Responsive layout
+- [ ] Error boundaries + user-friendly messages
+- [ ] README with setup instructions + security note (JWT in localStorage = known MVP limitation)
+- [ ] Tune `mastery_threshold`, `recent_attempt_window`, `min_pool_size` based on usage data

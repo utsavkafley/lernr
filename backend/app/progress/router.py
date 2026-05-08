@@ -112,7 +112,6 @@ def summary(
     total_attempts = db.execute(
         select(func.count(Attempt.id)).where(
             Attempt.user_id == current_user.id,
-            Attempt.evaluation_state.in_(["correct", "acceptable"]),
         )
     ).scalar()
 

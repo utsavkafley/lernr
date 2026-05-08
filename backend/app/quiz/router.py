@@ -148,6 +148,30 @@ def next_question(
     )
 
 
+@router.get("/hint/{question_id}")
+def get_hint(
+    question_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    question = db.execute(
+        select(Question).where(Question.id == question_id)
+    ).scalar_one_or_none()
+
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    # Mask each word: keep first letter, replace rest with underscores.
+    # Single-character tokens (punctuation, lone letters) are left as-is.
+    def mask(word: str) -> str:
+        if len(word) <= 1:
+            return word
+        return word[0] + "_" * (len(word) - 1)
+
+    masked = " ".join(mask(w) for w in question.answer.split())
+    return {"hint": masked}
+
+
 @router.post("/submit", response_model=SubmitAnswerResponse)
 def submit_answer(
     body: SubmitAnswerRequest,

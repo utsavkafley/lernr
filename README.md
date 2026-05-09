@@ -87,19 +87,7 @@ Start the server:
 uvicorn app.main:app --reload
 ```
 
-API docs available at `http://localhost:8000/docs`.
-
----
-
-## Status
-
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 0 | Data pipeline (transcript parsing + seeding) | ✅ Done |
-| 1 | Backend API | ✅ Done |
-| 2 | Frontend (Vue) | 🔨 In progress |
-| 3 | AI Socratic tutor (LangGraph) | 🔜 Planned |
-| 4 | Deployment (AWS ECS + RDS) | 🔜 Planned |
+API docs available at `https://api.utsavkafley.com/docs`.
 
 ---
 

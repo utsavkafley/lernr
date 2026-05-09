@@ -11,7 +11,7 @@ Language Transfer teaches Spanish through the Socratic method — the teacher as
 - **Track browser** — mark the 90 LT tracks as completed as you work through the course
 - **Practice mode** — quiz questions pulled from your completed tracks, weighted toward concepts you're weakest on
 - **Progress dashboard** — per-concept accuracy, overall stats, weak spot identification
-- **Socratic AI tutor** — LangGraph-powered agent that guides you to answers through questions, never by just telling you
+- **Socratic AI tutor** — COMING SOON:LangGraph-powered agent that guides you to answers through questions, never by just telling you
 
 ---
 

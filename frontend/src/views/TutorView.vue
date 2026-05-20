@@ -24,6 +24,11 @@ watch(
   { deep: true },
 )
 
+// Refocus input whenever streaming finishes
+watch(isStreaming, (streaming) => {
+  if (!streaming) nextTick(() => inputEl.value?.focus())
+})
+
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey && !isStreaming.value) submit()
 }

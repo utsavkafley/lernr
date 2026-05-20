@@ -168,8 +168,11 @@ def build_graph(checkpointer, db: Session):
             model="claude-haiku-4-5-20251001",
             max_tokens=8,
             system=(
-                "Evaluate whether the student's Spanish answer is correct. "
-                "Reply with exactly one word: correct, acceptable, or incorrect."
+                "Evaluate whether the student's Spanish answer conveys the correct meaning. "
+                "Be lenient about: missing or wrong accent marks, clitic attachment "
+                "(e.g. 'publicar lo' vs 'publicarlo'), minor word-order variations, and "
+                "capitalisation. Only mark incorrect if the meaning is wrong or a key word "
+                "is missing/wrong. Reply with exactly one word: correct, acceptable, or incorrect."
             ),
             messages=[{
                 "role": "user",

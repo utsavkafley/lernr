@@ -63,7 +63,7 @@ def unmark_complete(
 
     if progress:
         progress.completed = False
-        progress.competed_at = None
+        progress.completed_at = None
         db.commit()
 
 

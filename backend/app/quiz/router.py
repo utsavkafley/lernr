@@ -36,9 +36,11 @@ def _llm_evaluate(prompt: str, expected: str, alternates: list, user_answer: str
             "You are a Spanish language answer evaluator. "
             "Given a question, the expected answer(s), and a student's answer, "
             "reply with exactly one word: correct, acceptable, or incorrect.\n"
-            "correct = matches expected meaning exactly\n"
-            "acceptable = correct meaning, minor spelling or word-order variation\n"
-            "incorrect = wrong meaning or translation"
+            "correct = right meaning; accent marks, capitalisation, and clitic "
+            "attachment (e.g. 'publicar lo' vs 'publicarlo') do not matter\n"
+            "acceptable = correct meaning but a minor word-order variation or "
+            "slightly different phrasing that still conveys the same thing\n"
+            "incorrect = wrong meaning, wrong verb, or key word missing"
         ),
         messages=[{
             "role": "user",
@@ -61,9 +63,10 @@ def _evaluate(question: Question, user_answer: str) -> str:
     if normalized_user in all_expected:
         return "correct"
 
+    # Accent marks are hard to type — treat accent-only differences as fully correct
     stripped_user = _strip_accents(normalized_user)
     if any(stripped_user == _strip_accents(e) for e in all_expected):
-        return "acceptable"
+        return "correct"
 
     return _llm_evaluate(question.prompt, question.answer, question.alternate_answers, user_answer)
 

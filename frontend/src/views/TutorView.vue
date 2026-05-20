@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
+
+function renderMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+}
 import { useStream } from '@/composables/useStream'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -129,7 +135,7 @@ const evalLabel = computed(() => {
             "
           >
             <!-- Streaming cursor on last assistant message -->
-            <span>{{ msg.content }}</span>
+            <span v-html="renderMarkdown(msg.content)" />
             <span
               v-if="isStreaming && idx === messages.length - 1 && msg.role === 'assistant'"
               class="inline-block w-0.5 h-3.5 bg-current ml-0.5 align-middle animate-pulse"

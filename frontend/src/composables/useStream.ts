@@ -12,6 +12,8 @@ export function useStream() {
   const sessionId = ref<string | null>(null)
   const currentConcept = ref<string>('')
   const lastEvaluation = ref<string>('')
+  const currentStep = ref(0)
+  const totalSteps = ref(0)
 
   const auth = useAuthStore()
   const BASE_URL = import.meta.env.VITE_API_URL
@@ -60,6 +62,8 @@ export function useStream() {
         } else if (data.type === 'done') {
           currentConcept.value = data.concept ?? ''
           lastEvaluation.value = data.evaluation ?? ''
+          currentStep.value = data.step ?? 0
+          totalSteps.value = data.total_steps ?? 0
         }
       }
     }
@@ -93,7 +97,9 @@ export function useStream() {
     sessionId.value = null
     currentConcept.value = ''
     lastEvaluation.value = ''
+    currentStep.value = 0
+    totalSteps.value = 0
   }
 
-  return { messages, isStreaming, sessionId, currentConcept, lastEvaluation, send, startSession, reset }
+  return { messages, isStreaming, sessionId, currentConcept, lastEvaluation, currentStep, totalSteps, send, startSession, reset }
 }

@@ -95,7 +95,12 @@ async def chat(
                 yield f"data: {json.dumps({'type': 'token', 'content': word + ' '})}\n\n"
                 await asyncio.sleep(0.02)  # subtle pacing for a typewriter feel
 
-        yield f"data: {json.dumps({'type': 'done', 'concept': result.get('target_concept', ''), 'evaluation': result.get('last_evaluation', '')})}\n\n"
+        plan = result.get("session_plan") or {}
+        chain = plan.get("teaching_chain") or []
+        current_step = plan.get("current_step", 0)
+        total_steps = len(chain)
+
+        yield f"data: {json.dumps({'type': 'done', 'concept': plan.get('target_concept', ''), 'evaluation': (result.get('last_evaluation') or {}).get('verdict', ''), 'step': current_step + 1, 'total_steps': total_steps})}\n\n"
 
     return StreamingResponse(
         stream(),

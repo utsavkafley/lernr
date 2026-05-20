@@ -10,7 +10,7 @@ import { useStream } from '@/composables/useStream'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
-const { messages, isStreaming, currentConcept, lastEvaluation, send, startSession, reset } =
+const { messages, isStreaming, currentConcept, lastEvaluation, currentStep, totalSteps, send, startSession, reset } =
   useStream()
 
 const input = ref('')
@@ -79,18 +79,30 @@ const evalLabel = computed(() => {
         <h1 class="text-3xl font-bold tracking-tight">Socratic session</h1>
       </div>
       <div class="flex items-center gap-3">
-        <!-- Current concept badge -->
+        <!-- Concept + step progress -->
         <div
           v-if="currentConcept"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 animate-fade-up"
+          class="flex flex-col items-end gap-1 animate-fade-up"
         >
-          <span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></span>
-          <span class="text-xs font-semibold text-primary truncate max-w-[160px]">{{ currentConcept }}</span>
+          <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20">
+            <span class="w-1.5 h-1.5 rounded-full bg-primary animate-pulse shrink-0"></span>
+            <span class="text-xs font-semibold text-primary truncate max-w-[160px]">{{ currentConcept }}</span>
+          </div>
+          <!-- Step progress dots -->
+          <div v-if="totalSteps > 0" class="flex items-center gap-1 px-1">
+            <span
+              v-for="i in totalSteps"
+              :key="i"
+              class="w-1.5 h-1.5 rounded-full transition-all duration-300"
+              :class="i <= currentStep ? 'bg-primary' : 'bg-muted-foreground/30'"
+            />
+          </div>
         </div>
+
         <!-- Last evaluation pill -->
         <span
           v-if="evalLabel && !isStreaming"
-          class="text-xs font-semibold tabular-nums animate-fade-up"
+          class="text-xs font-semibold animate-fade-up"
           :class="evalColor"
         >
           {{ evalLabel }}

@@ -1,111 +1,99 @@
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export function useStream() {
-  const messages = ref<{ role: 'user' | 'assistant'; content: string }[]>([])
+  const messages = ref<ChatMessage[]>([])
   const isStreaming = ref(false)
   const sessionId = ref<string | null>(null)
   const currentConcept = ref<string>('')
+  const lastEvaluation = ref<string>('')
 
   const auth = useAuthStore()
   const BASE_URL = import.meta.env.VITE_API_URL
 
+  async function _callAgent(payload: { message?: string; session_id?: string | null }) {
+    const response = await fetch(`${BASE_URL}/agent/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${auth.token}`,
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (!response.ok) throw new Error(`Agent error: ${response.status}`)
+
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let assistantContent = ''
+    let assistantIndex = -1
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const chunk = decoder.decode(value)
+      for (const line of chunk.split('\n')) {
+        if (!line.startsWith('data: ')) continue
+        let data: Record<string, string>
+        try {
+          data = JSON.parse(line.slice(6))
+        } catch {
+          continue
+        }
+
+        if (data.type === 'session') {
+          sessionId.value = data.session_id
+        } else if (data.type === 'token') {
+          if (assistantIndex === -1) {
+            messages.value.push({ role: 'assistant', content: '' })
+            assistantIndex = messages.value.length - 1
+            assistantContent = ''
+          }
+          assistantContent += data.content
+          messages.value[assistantIndex].content = assistantContent
+        } else if (data.type === 'done') {
+          currentConcept.value = data.concept ?? ''
+          lastEvaluation.value = data.evaluation ?? ''
+        }
+      }
+    }
+  }
+
+  /** Start a fresh session — AI asks the first question. */
+  async function startSession() {
+    if (isStreaming.value) return
+    isStreaming.value = true
+    try {
+      await _callAgent({ session_id: null })
+    } finally {
+      isStreaming.value = false
+    }
+  }
+
+  /** Send a user message and stream the AI response. */
   async function send(userMessage: string) {
     if (!userMessage.trim() || isStreaming.value) return
-
-    messages.value.push({ role: 'user', content: userMessage })
+    messages.value.push({ role: 'user', content: userMessage.trim() })
     isStreaming.value = true
-
-    let assistantContent = ''
-    messages.value.push({ role: 'assistant', content: '' })
-    const assistantIndex = messages.value.length - 1
-
     try {
-      const response = await fetch(`${BASE_URL}/agent/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${auth.token}`,
-        },
-        body: JSON.stringify({
-          message: userMessage,
-          session_id: sessionId.value,
-        }),
-      })
-
-      const reader = response.body!.getReader()
-      const decoder = new TextDecoder()
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        const chunk = decoder.decode(value)
-        const lines = chunk.split('\n')
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const data = JSON.parse(line.slice(6))
-
-          if (data.type === 'session') {
-            sessionId.value = data.session_id
-          } else if (data.type === 'token') {
-            assistantContent += data.content
-            messages.value[assistantIndex].content = assistantContent
-          } else if (data.type === 'done') {
-            currentConcept.value = data.concept
-          }
-        }
-      }
+      await _callAgent({ message: userMessage.trim(), session_id: sessionId.value })
     } finally {
       isStreaming.value = false
     }
   }
 
-  async function startSession() {
-    isStreaming.value = true
-    let assistantContent = ''
-    messages.value.push({ role: 'assistant', content: '' })
-    const assistantIndex = messages.value.length - 1
-
-    try {
-      const response = await fetch(`${BASE_URL}/agent/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${auth.token}`,
-        },
-        body: JSON.stringify({ session_id: null }),
-      })
-
-      const reader = response.body!.getReader()
-      const decoder = new TextDecoder()
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        const chunk = decoder.decode(value)
-        const lines = chunk.split('\n')
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const data = JSON.parse(line.slice(6))
-
-          if (data.type === 'session') {
-            sessionId.value = data.session_id
-          } else if (data.type === 'token') {
-            assistantContent += data.content
-            messages.value[assistantIndex].content = assistantContent
-          } else if (data.type === 'done') {
-            currentConcept.value = data.concept
-          }
-        }
-      }
-    } finally {
-      isStreaming.value = false
-    }
+  function reset() {
+    messages.value = []
+    sessionId.value = null
+    currentConcept.value = ''
+    lastEvaluation.value = ''
   }
 
-  return { messages, isStreaming, sessionId, currentConcept, send, startSession }
+  return { messages, isStreaming, sessionId, currentConcept, lastEvaluation, send, startSession, reset }
 }

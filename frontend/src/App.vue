@@ -17,6 +17,7 @@ function logout() {
 const navItems = [
   { to: '/tracks', label: 'Tracks' },
   { to: '/practice', label: 'Practice' },
+  { to: '/tutor', label: 'Tutor' },
   { to: '/progress', label: 'Progress' },
 ]
 </script>

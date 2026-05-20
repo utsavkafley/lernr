@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from fastapi import APIRouter, Depends, Request
@@ -6,11 +7,21 @@ from sqlalchemy.orm import Session
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from app.auth.dependencies import get_current_user
-from app.database import get_db, engine
+from app.database import get_db
 from app.models import User
-from app.agent.graph import build_graph
+from app.agent.graph import build_graph, TutorState
+from app.config import settings
 
 router = APIRouter(prefix="/agent", tags=["agent"])
+
+
+def _pg_conn_str() -> str:
+    """Return a plain psycopg2 connection string (strip SQLAlchemy dialect prefix)."""
+    url = settings.database_url
+    # Replace postgresql+psycopg2:// → postgresql://
+    return url.replace("postgresql+psycopg2://", "postgresql://").replace(
+        "postgresql+psycopg://", "postgresql://"
+    )
 
 
 @router.post("/chat")
@@ -20,43 +31,59 @@ async def chat(
     current_user: User = Depends(get_current_user),
 ):
     body = await request.json()
-    session_id = body.get("session_id") or str(uuid.uuid4())
-    user_message = body.get("message", "")
+    session_id: str = body.get("session_id") or str(uuid.uuid4())
+    user_message: str = body.get("message", "").strip()
 
     thread_id = f"{current_user.id}:{session_id}"
-
-    checkpointer = PostgresSaver.from_conn_string(str(engine.url))
-    checkpointer.setup()
-    graph = build_graph(checkpointer, db)
-
     config = {"configurable": {"thread_id": thread_id}}
 
-    initial_state = {
-        "messages": [],
-        "target_concept": "",
-        "target_question": {},
-        "hint_level": 0,
-        "user_id": str(current_user.id),
-    }
-
-    if user_message:
-        checkpoint = checkpointer.get(config)
-        if checkpoint:
-            current_state = checkpoint["channel_values"]
-            current_state["messages"] = current_state.get("messages", []) + [
-                {"role": "user", "content": user_message}
-            ]
-            input_state = current_state
-        else:
-            input_state = {**initial_state, "messages": [{"role": "user", "content": user_message}]}
-    else:
-        input_state = initial_state
-
     async def stream():
-        yield f"data: {json.dumps({'session_id': session_id, 'type': 'session'})}\n\n"
+        # Send session id first so the client can persist it
+        yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
 
-        result = graph.invoke(input_state, config=config)
+        with PostgresSaver.from_conn_string(_pg_conn_str()) as checkpointer:
+            checkpointer.setup()
+            graph = build_graph(checkpointer, db)
 
+            # Build input state -----------------------------------------------
+            checkpoint = checkpointer.get(config)
+            if checkpoint:
+                # Resume from persisted state
+                persisted: TutorState = checkpoint["channel_values"]
+                if user_message:
+                    input_state: TutorState = {
+                        **persisted,
+                        "messages": persisted.get("messages", [])
+                        + [{"role": "user", "content": user_message}],
+                    }
+                else:
+                    # Client asked for a fresh question without sending an answer
+                    input_state = persisted
+            else:
+                # Brand-new session
+                base: TutorState = {
+                    "messages": [],
+                    "target_concept": "",
+                    "target_question": {},
+                    "hint_level": 0,
+                    "user_id": str(current_user.id),
+                    "last_evaluation": "",
+                    "correct_streak": 0,
+                }
+                if user_message:
+                    input_state = {
+                        **base,
+                        "messages": [{"role": "user", "content": user_message}],
+                    }
+                else:
+                    input_state = base
+
+            # Run graph (sync) in a thread so we don't block the event loop
+            result: TutorState = await asyncio.to_thread(
+                graph.invoke, input_state, config
+            )
+
+        # Stream the last assistant message word-by-word --------------------
         messages = result.get("messages", [])
         last_ai = next(
             (m["content"] for m in reversed(messages) if m["role"] == "assistant"),
@@ -66,8 +93,9 @@ async def chat(
         if last_ai:
             for word in last_ai.split(" "):
                 yield f"data: {json.dumps({'type': 'token', 'content': word + ' '})}\n\n"
+                await asyncio.sleep(0.02)  # subtle pacing for a typewriter feel
 
-        yield f"data: {json.dumps({'type': 'done', 'concept': result.get('target_concept', '')})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'concept': result.get('target_concept', ''), 'evaluation': result.get('last_evaluation', '')})}\n\n"
 
     return StreamingResponse(
         stream(),

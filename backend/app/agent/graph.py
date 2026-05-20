@@ -1,5 +1,5 @@
 from typing import TypedDict
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, END, START
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 import anthropic
@@ -9,12 +9,18 @@ from app.config import settings
 
 
 class TutorState(TypedDict):
-    messages: list
-    target_concept: str
-    target_question: dict
-    hint_level: int
+    messages: list          # [{"role": "user"|"assistant", "content": str}, ...]
+    target_concept: str     # concept currently being drilled
+    target_question: dict   # {"id", "prompt", "answer"}
+    hint_level: int         # 0–3, how many hints have been given on this question
     user_id: str
+    last_evaluation: str    # "correct" | "acceptable" | "incorrect" | ""
+    correct_streak: int     # consecutive correct/acceptable on current concept
 
+
+# ---------------------------------------------------------------------------
+# DB helpers
+# ---------------------------------------------------------------------------
 
 def get_weak_concepts(user_id: str, db: Session) -> list[dict]:
     rows = db.execute(
@@ -30,16 +36,14 @@ def get_weak_concepts(user_id: str, db: Session) -> list[dict]:
         .join(Attempt, Attempt.question_id == QuestionConcept.question_id)
         .where(Attempt.user_id == user_id)
         .group_by(Concept.id, Concept.name)
-        .order_by(
-            (func.count(Attempt.id).filter(
-                Attempt.evaluation_state.in_(["correct", "acceptable"])
-            ) / func.count(Attempt.id)).asc()
-        )
+        .having(func.count(Attempt.id) > 0)
     ).all()
-    return [
+
+    stats = [
         {"id": r.id, "name": r.name, "accuracy": round((r.correct or 0) / r.total, 2)}
         for r in rows
     ]
+    return sorted(stats, key=lambda x: x["accuracy"])
 
 
 def get_concept_questions(concept_name: str, user_id: str, db: Session) -> list[dict]:
@@ -64,58 +68,95 @@ def get_concept_questions(concept_name: str, user_id: str, db: Session) -> list[
     return [{"id": q.id, "prompt": q.prompt, "answer": q.answer} for q in questions]
 
 
-SYSTEM_PROMPT = """You are a Socratic Spanish tutor based on the Language Transfer method.
-Your role is to guide students to discover answers themselves through questions — never give the answer directly.
+# ---------------------------------------------------------------------------
+# System prompt
+# ---------------------------------------------------------------------------
 
-When a student struggles:
-- hint_level 0: Ask a related simpler question to activate prior knowledge
-- hint_level 1: Break the question into smaller steps
-- hint_level 2: Give a strong hint (portion of the phrase, pattern reminder)
-- hint_level 3: Reveal the answer with a clear explanation
+SYSTEM_PROMPT = """You are a Socratic Spanish tutor using the Language Transfer method.
+Guide students to discover answers themselves — never give the answer away.
 
-Always be encouraging. Keep responses short (2–4 sentences max).
-Never translate directly — always ask "what do you think?" first.
-"""
+Tone: warm, encouraging, concise. Max 3 sentences per response.
 
+Hint level behaviour:
+  0 – Ask a related simpler question to activate prior knowledge.
+  1 – Break the target phrase into smaller pieces, ask about each.
+  2 – Give a strong structural hint (show the pattern, mask the word).
+  3 – Reveal the answer with a brief, memorable explanation.
+
+Never translate word-for-word. Always invite the student to try first."""
+
+
+# ---------------------------------------------------------------------------
+# Graph nodes
+# ---------------------------------------------------------------------------
 
 def build_graph(checkpointer, db: Session):
+
+    # --- entry router ---------------------------------------------------
+    def entry_router(state: TutorState) -> str:
+        msgs = state.get("messages", [])
+        if msgs and msgs[-1]["role"] == "user":
+            return "evaluate_response"
+        return "select_concept"
+
+    # --- select_concept -------------------------------------------------
     def select_concept(state: TutorState) -> TutorState:
+        # Keep current concept unless it was cleared by reinforce
         if state.get("target_concept"):
             return state
+
         weak = get_weak_concepts(state["user_id"], db)
         concept = weak[0]["name"] if weak else "present tense verbs"
         questions = get_concept_questions(concept, state["user_id"], db)
         question = questions[0] if questions else {}
+
         return {
             **state,
             "target_concept": concept,
             "target_question": question,
             "hint_level": 0,
+            "last_evaluation": "",
+            "correct_streak": 0,
         }
 
+    # --- ask_question ---------------------------------------------------
     def ask_question(state: TutorState) -> TutorState:
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         q = state.get("target_question", {})
         hint_level = state.get("hint_level", 0)
+        concept = state.get("target_concept", "")
 
-        if not state["messages"] or hint_level == 0:
-            prompt = f"Ask the student this question using the Socratic method: '{q.get('prompt', '')}'. Don't reveal the answer."
+        if not state.get("messages"):
+            user_prompt = (
+                f"The student is working on: '{concept}'.\n"
+                f"Start the session by asking them this question using the Socratic method: "
+                f"'{q.get('prompt', '')}'. Do not reveal the answer."
+            )
         else:
-            prompt = f"The student is struggling (hint level {hint_level}/3). Guide them toward '{q.get('prompt', '')}' with a hint appropriate for level {hint_level}."
+            user_prompt = (
+                f"The student is on hint level {hint_level}/3 for concept '{concept}'.\n"
+                f"Question: '{q.get('prompt', '')}'\n"
+                f"Guide them with a level-{hint_level} hint. Do not reveal the full answer yet."
+            )
 
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=256,
             system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": user_prompt}],
         )
-        ai_text = response.content[0].text
-        return {**state, "messages": state["messages"] + [{"role": "assistant", "content": ai_text}]}
+        ai_text = response.content[0].text.strip()
 
+        return {
+            **state,
+            "messages": state.get("messages", []) + [{"role": "assistant", "content": ai_text}],
+        }
+
+    # --- evaluate_response ----------------------------------------------
     def evaluate_response(state: TutorState) -> TutorState:
-        messages = state["messages"]
+        msgs = state.get("messages", [])
         last_human = next(
-            (m["content"] for m in reversed(messages) if m["role"] == "user"), ""
+            (m["content"] for m in reversed(msgs) if m["role"] == "user"), ""
         )
         q = state.get("target_question", {})
 
@@ -123,55 +164,97 @@ def build_graph(checkpointer, db: Session):
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=8,
-            system="Evaluate if the student's answer is correct. Reply with exactly one word: correct, acceptable, or incorrect.",
+            system=(
+                "Evaluate whether the student's Spanish answer is correct. "
+                "Reply with exactly one word: correct, acceptable, or incorrect."
+            ),
             messages=[{
                 "role": "user",
-                "content": f"Question: {q.get('prompt', '')}\nExpected: {q.get('answer', '')}\nStudent said: {last_human}",
+                "content": (
+                    f"Question: {q.get('prompt', '')}\n"
+                    f"Expected: {q.get('answer', '')}\n"
+                    f"Student said: {last_human}"
+                ),
             }],
         )
         verdict = response.content[0].text.strip().lower()
         if verdict not in ("correct", "acceptable", "incorrect"):
             verdict = "incorrect"
-        return {**state, "messages": messages + [{"role": "system", "content": f"__eval__{verdict}"}]}
 
-    def router_after_eval(state: TutorState) -> str:
-        messages = state["messages"]
-        last_sys = next(
-            (m["content"] for m in reversed(messages) if m["role"] == "system"), ""
-        )
-        if "__eval__correct" in last_sys or "__eval__acceptable" in last_sys:
+        streak = state.get("correct_streak", 0)
+        if verdict in ("correct", "acceptable"):
+            streak += 1
+        else:
+            streak = 0
+
+        return {**state, "last_evaluation": verdict, "correct_streak": streak}
+
+    # --- post-eval router -----------------------------------------------
+    def post_eval_router(state: TutorState) -> str:
+        if state.get("last_evaluation") in ("correct", "acceptable"):
             return "reinforce"
         return "give_hint"
 
+    # --- give_hint ------------------------------------------------------
     def give_hint(state: TutorState) -> TutorState:
         new_level = min(state.get("hint_level", 0) + 1, 3)
         return {**state, "hint_level": new_level}
 
+    # --- reinforce ------------------------------------------------------
     def reinforce(state: TutorState) -> TutorState:
-        correct_count = sum(
-            1 for m in state["messages"]
-            if m["role"] == "system"
-            and ("__eval__correct" in m["content"] or "__eval__acceptable" in m["content"])
-        )
-        if correct_count >= 3:
-            return {**state, "target_concept": "", "target_question": {}, "hint_level": 0}
-        return state
+        # Move to a new concept after 3 correct answers on the current one
+        if state.get("correct_streak", 0) >= 3:
+            return {
+                **state,
+                "target_concept": "",
+                "target_question": {},
+                "hint_level": 0,
+                "last_evaluation": "",
+                "correct_streak": 0,
+            }
+        # Same concept, new question
+        concept = state.get("target_concept", "")
+        questions = get_concept_questions(concept, state["user_id"], db)
+        current_q_id = state.get("target_question", {}).get("id")
+        next_q = next((q for q in questions if q["id"] != current_q_id), None)
+        if next_q:
+            return {**state, "target_question": next_q, "hint_level": 0, "last_evaluation": ""}
+        # No more questions on this concept → move on
+        return {
+            **state,
+            "target_concept": "",
+            "target_question": {},
+            "hint_level": 0,
+            "last_evaluation": "",
+            "correct_streak": 0,
+        }
+
+    # ---------------------------------------------------------------------------
+    # Assemble graph
+    # ---------------------------------------------------------------------------
 
     graph = StateGraph(TutorState)
+
     graph.add_node("select_concept", select_concept)
     graph.add_node("ask_question", ask_question)
     graph.add_node("evaluate_response", evaluate_response)
     graph.add_node("give_hint", give_hint)
     graph.add_node("reinforce", reinforce)
 
-    graph.set_entry_point("select_concept")
+    # Entry: route based on whether the last message is from the user
+    graph.add_conditional_edges(START, entry_router, {
+        "select_concept": "select_concept",
+        "evaluate_response": "evaluate_response",
+    })
+
     graph.add_edge("select_concept", "ask_question")
     graph.add_edge("ask_question", END)
-    graph.add_edge("give_hint", "ask_question")
-    graph.add_edge("reinforce", "select_concept")
-    graph.add_conditional_edges("evaluate_response", router_after_eval, {
+
+    graph.add_conditional_edges("evaluate_response", post_eval_router, {
         "reinforce": "reinforce",
         "give_hint": "give_hint",
     })
+    graph.add_edge("give_hint", "ask_question")
+    graph.add_edge("reinforce", "select_concept")
 
     return graph.compile(checkpointer=checkpointer)

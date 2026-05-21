@@ -63,12 +63,10 @@ async def chat(
                 # Brand-new session
                 base: TutorState = {
                     "messages": [],
-                    "target_concept": "",
-                    "target_question": {},
-                    "hint_level": 0,
                     "user_id": str(current_user.id),
-                    "last_evaluation": "",
-                    "correct_streak": 0,
+                    "student_model": {},
+                    "session_plan": {},
+                    "last_evaluation": {},
                 }
                 if user_message:
                     input_state = {

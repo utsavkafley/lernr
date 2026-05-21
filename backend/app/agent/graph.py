@@ -105,17 +105,49 @@ def _completed_track_ids(user_id: str, db: Session) -> list[int]:
     ).scalars().all()
 
 
+def _max_completed_track_number(user_id: str, db: Session) -> int:
+    """Return the highest track number the user has completed (0 if none)."""
+    from app.models import Track
+    completed_ids = _completed_track_ids(user_id, db)
+    if not completed_ids:
+        return 0
+    result = db.execute(
+        select(func.max(Track.number)).where(Track.id.in_(completed_ids))
+    ).scalar()
+    return result or 0
+
+
 # ---------------------------------------------------------------------------
 # LLM calls
 # ---------------------------------------------------------------------------
 
 def _claude(system: str, user: str, max_tokens: int = 512) -> str:
+    """Single-turn call — planner and evaluator."""
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user}],
+    )
+    return response.content[0].text.strip()
+
+
+def _claude_chat(system: str, messages: list, max_tokens: int = 512) -> str:
+    """Multi-turn call — conversationalist. Passes real message history."""
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    # Anthropic requires messages to alternate roles; ensure we start with user
+    filtered = []
+    for m in messages:
+        if m["role"] in ("user", "assistant"):
+            filtered.append({"role": m["role"], "content": m["content"]})
+    if not filtered or filtered[0]["role"] != "user":
+        filtered.insert(0, {"role": "user", "content": "Begin."})
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=max_tokens,
+        system=system,
+        messages=filtered,
     )
     return response.content[0].text.strip()
 
@@ -148,17 +180,27 @@ def build_graph(checkpointer, db: Session):
     def plan_session(state: TutorState) -> TutorState:
         model: dict = state.get("student_model", {})
 
+        # Only consider concepts introduced up to the student's highest completed track
+        max_track = _max_completed_track_number(state["user_id"], db)
+        available_concepts: set[str] = set(
+            db.execute(
+                select(Concept.name).where(Concept.first_track <= max_track)
+            ).scalars().all()
+        ) if max_track > 0 else set()
+
         # Split into weak (needs work) and known (can build from)
+        # — constrained to concepts the student has actually been exposed to
         weak = {
             name: m for name, m in model.items()
             if not m["mastered"] and m["attempts"] >= 1
+            and (not available_concepts or name in available_concepts)
         }
         known = {
             name: m for name, m in model.items()
             if m["mastered"]
         }
 
-        # If nothing attempted yet, prime with a starter concept
+        # If nothing attempted yet, prime with the earliest available concept
         if not weak:
             weak = {"present tense verbs": {"accuracy": 0.0, "attempts": 0, "mastered": False}}
 
@@ -204,10 +246,14 @@ Return ONLY valid JSON in this exact shape, no prose:
 }"""
 
         user = (
+            f"Student level: has completed tracks 1–{max_track} of Language Transfer Complete Spanish.\n"
             f"Target concept to teach: {target_concept}\n"
             f"Concepts the student has mastered: {known_summary}\n"
             f"Concepts the student is weak on: {weak_summary}\n\n"
-            "Build the teaching chain."
+            "Build a teaching chain appropriate for this level. "
+            "Early tracks (1-10) cover: basic verb conjugation (-ar/-er/-ir), "
+            "pronouns (yo/tú/él), negation (no), simple questions, want/need/can. "
+            "Do not introduce concepts beyond what appears in the completed tracks."
         )
 
         raw = _claude(system, user, max_tokens=1024)
@@ -356,16 +402,16 @@ Length: 1-3 sentences max. Always end with a question."""
                 "This is the opening of the session. Start warmly and ask the first question."
             )
 
-        context = "\n".join(context_parts)
+        # Inject session context into the system prompt — NOT as a user message
+        full_system = system + "\n\n--- SESSION CONTEXT ---\n" + "\n".join(context_parts)
 
-        # Include conversation history for continuity
+        # Pass the real conversation history as proper messages
         history = [
             {"role": m["role"], "content": m["content"]}
             for m in msgs[-8:]  # last 8 messages for context window hygiene
         ]
-        history.append({"role": "user", "content": context})
 
-        ai_text = _claude(system, json.dumps(history), max_tokens=256)
+        ai_text = _claude_chat(full_system, history, max_tokens=256)
 
         return {
             **state,

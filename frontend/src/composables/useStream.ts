@@ -62,8 +62,8 @@ export function useStream() {
         } else if (data.type === 'done') {
           currentConcept.value = data.concept ?? ''
           lastEvaluation.value = data.evaluation ?? ''
-          currentStep.value = data.step ?? 0
-          totalSteps.value = data.total_steps ?? 0
+          currentStep.value = Number(data.step ?? 0)
+          totalSteps.value = Number(data.total_steps ?? 0)
         }
       }
     }

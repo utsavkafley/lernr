@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { useQuizStore } from '@/stores/quiz'
+
+const route = useRoute()
 import { speakSpanish } from '@/composables/useSpeech'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -25,7 +28,8 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 onMounted(() => {
-  quiz.resetSession()
+  const conceptId = route.query.concept_id ? Number(route.query.concept_id) : null
+  quiz.resetSession(conceptId)
   quiz.fetchNext()
   window.addEventListener('keydown', handleKeydown)
 })
@@ -96,6 +100,9 @@ const stateConfig: Record<'correct' | 'acceptable' | 'incorrect', ResultStyle> =
         <h1 class="text-4xl font-bold tracking-tight">
           Build your fluency
         </h1>
+        <p v-if="route.query.concept_name" class="text-sm text-muted-foreground mt-1">
+          Focused on: <span class="font-medium text-foreground">{{ route.query.concept_name }}</span>
+        </p>
       </div>
       <div v-if="quiz.sessionTotal > 0" class="text-right">
         <p class="text-3xl font-bold tabular-nums">{{ accuracy }}%</p>

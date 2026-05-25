@@ -11,14 +11,17 @@ export function useStream() {
   const isStreaming = ref(false)
   const sessionId = ref<string | null>(null)
   const currentConcept = ref<string>('')
+  const currentConceptId = ref<number | null>(null)
   const lastEvaluation = ref<string>('')
   const currentStep = ref(0)
   const totalSteps = ref(0)
+  const suggestQuiz = ref(false)
+  const chatScore = ref(0)
 
   const auth = useAuthStore()
   const BASE_URL = import.meta.env.VITE_API_URL
 
-  async function _callAgent(payload: { message?: string; session_id?: string | null }) {
+  async function _callAgent(payload: { message?: string; session_id?: string | null; concept_id?: number | null }) {
     const response = await fetch(`${BASE_URL}/agent/chat`, {
       method: 'POST',
       headers: {
@@ -61,20 +64,24 @@ export function useStream() {
           messages.value[assistantIndex].content = assistantContent
         } else if (data.type === 'done') {
           currentConcept.value = data.concept ?? ''
+          currentConceptId.value = data.concept_id ? Number(data.concept_id) : null
           lastEvaluation.value = data.evaluation ?? ''
           currentStep.value = Number(data.step ?? 0)
           totalSteps.value = Number(data.total_steps ?? 0)
+          suggestQuiz.value = Boolean(data.suggest_quiz)
+          chatScore.value = Number(data.chat_score ?? 0)
         }
       }
     }
   }
 
-  /** Start a fresh session — AI asks the first question. */
-  async function startSession() {
+  /** Start a fresh session — AI asks the first question.
+   *  Pass conceptId to seed a concept-specific session from the progress view. */
+  async function startSession(conceptId?: number | null) {
     if (isStreaming.value) return
     isStreaming.value = true
     try {
-      await _callAgent({ session_id: null })
+      await _callAgent({ session_id: null, concept_id: conceptId ?? null })
     } finally {
       isStreaming.value = false
     }
@@ -96,10 +103,18 @@ export function useStream() {
     messages.value = []
     sessionId.value = null
     currentConcept.value = ''
+    currentConceptId.value = null
     lastEvaluation.value = ''
     currentStep.value = 0
     totalSteps.value = 0
+    suggestQuiz.value = false
+    chatScore.value = 0
   }
 
-  return { messages, isStreaming, sessionId, currentConcept, lastEvaluation, currentStep, totalSteps, send, startSession, reset }
+  return {
+    messages, isStreaming, sessionId,
+    currentConcept, currentConceptId, lastEvaluation,
+    currentStep, totalSteps, suggestQuiz, chatScore,
+    send, startSession, reset,
+  }
 }

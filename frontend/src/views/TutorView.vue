@@ -1,17 +1,33 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useStream } from '@/composables/useStream'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 function renderMarkdown(text: string): string {
   return text
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
 }
-import { useStream } from '@/composables/useStream'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 
-const { messages, isStreaming, currentConcept, lastEvaluation, currentStep, totalSteps, send, startSession, reset } =
-  useStream()
+const route = useRoute()
+const router = useRouter()
+
+const {
+  messages, isStreaming,
+  currentConcept, currentConceptId, lastEvaluation,
+  currentStep, totalSteps, suggestQuiz, chatScore,
+  send, startSession, reset,
+} = useStream()
+
+const conceptIdFromRoute = computed(() => {
+  const v = route.query.concept_id
+  return v ? Number(v) : null
+})
+const conceptNameFromRoute = computed(() => {
+  return route.query.concept_name as string | undefined
+})
 
 const input = ref('')
 const scrollEl = ref<HTMLElement | null>(null)
@@ -34,7 +50,7 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 onMounted(() => {
-  startSession()
+  startSession(conceptIdFromRoute.value)
   window.addEventListener('keydown', handleKeydown)
 })
 
@@ -52,7 +68,7 @@ async function submit() {
 
 async function handleReset() {
   reset()
-  await startSession()
+  await startSession(conceptIdFromRoute.value)
 }
 
 const evalColor = computed(() => {
@@ -161,6 +177,27 @@ const evalLabel = computed(() => {
         </div>
       </template>
 
+      <!-- Quiz nudge — rendered as an interactive card, not prose -->
+      <div
+        v-if="suggestQuiz && !isStreaming"
+        class="flex justify-start animate-fade-up"
+      >
+        <div class="max-w-[80%] rounded-2xl rounded-tl-sm bg-primary/10 border border-primary/20 px-4 py-3 space-y-2">
+          <p class="text-sm font-medium text-primary">
+            You're getting this! Lock it in with the quiz.
+          </p>
+          <p class="text-xs text-muted-foreground">
+            Chat score: {{ Math.round(chatScore * 100) }}% — take the quiz to push it to mastery.
+          </p>
+          <button
+            @click="router.push({ path: '/practice', query: { concept_id: currentConceptId, concept_name: currentConcept } })"
+            class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+          >
+            Take the quiz on "{{ currentConcept }}" →
+          </button>
+        </div>
+      </div>
+
       <!-- Typing indicator while waiting for first token -->
       <div
         v-if="isStreaming && (messages.length === 0 || messages[messages.length - 1].role === 'user')"
@@ -197,7 +234,7 @@ const evalLabel = computed(() => {
       </Button>
     </div>
     <p class="text-center text-xs text-muted-foreground mt-2">
-      The tutor focuses on your weakest concepts first.
+      {{ conceptNameFromRoute ? `Focused on: ${conceptNameFromRoute}` : 'Reinforcing concepts closest to mastery' }}
     </p>
   </div>
 </template>

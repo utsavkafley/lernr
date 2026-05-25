@@ -31,13 +31,17 @@ export const useQuizStore = defineStore('quiz', () => {
   const sessionTotal = ref(0)
   const sessionCorrect = ref(0)
 
+  // Concept filter — set when entering from the progress view
+  const conceptId = ref<number | null>(null)
+
   async function fetchNext() {
     loading.value = true
     result.value = null
     hint.value = null
     noTracksCompleted.value = false
     try {
-      const { data } = await api.get('/quiz/next')
+      const params = conceptId.value ? { concept_id: conceptId.value } : {}
+      const { data } = await api.get('/quiz/next', { params })
       question.value = data
     } catch (err: any) {
       if (err.response?.status === 404) {
@@ -68,13 +72,14 @@ export const useQuizStore = defineStore('quiz', () => {
     }
   }
 
-  function resetSession() {
+  function resetSession(filterConceptId?: number | null) {
     question.value = null
     result.value = null
     hint.value = null
     sessionTotal.value = 0
     sessionCorrect.value = 0
     noTracksCompleted.value = false
+    conceptId.value = filterConceptId ?? null
   }
 
   return {
@@ -85,6 +90,7 @@ export const useQuizStore = defineStore('quiz', () => {
     noTracksCompleted,
     sessionTotal,
     sessionCorrect,
+    conceptId,
     fetchNext,
     fetchHint,
     submitAnswer,

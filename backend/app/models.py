@@ -2,13 +2,22 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, ForeignKey,
-    Integer, String, Text, UniqueConstraint, ARRAY
+    ARRAY,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+
 
 class User(Base):
     __tablename__ = "users"
@@ -17,10 +26,11 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     username = Column(String(255), unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     track_progress = relationship("UserTrackProgress", back_populates="user")
     attempts = relationship("Attempt", back_populates="user")
+    concept_progress = relationship("ConceptProgress", back_populates="user")
 
 
 class Track(Base):
@@ -44,6 +54,7 @@ class Concept(Base):
     first_track = Column(Integer, ForeignKey("tracks.number"), nullable=True)
 
     question_concepts = relationship("QuestionConcept", back_populates="concept")
+    concept_progress = relationship("ConceptProgress", back_populates="concept")
 
 
 class Question(Base):
@@ -85,16 +96,36 @@ class UserTrackProgress(Base):
     user = relationship("User", back_populates="track_progress")
     track = relationship("Track", back_populates="user_progress")
 
+
 class Attempt(Base):
     __tablename__ = "attempts"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
     question_id = Column(Integer, ForeignKey("questions.id"), nullable=False)
     user_answer = Column(Text, nullable=False)
     evaluation_state = Column(String(20), nullable=False)
-    created_at = Column(DateTime(timezone=True), default=lambda:
-    datetime.now(timezone.utc), index=True)
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
 
     user = relationship("User", back_populates="attempts")
     question = relationship("Question", back_populates="attempts")
+
+
+class ConceptProgress(Base):
+    __tablename__ = "concept_progress"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    concept_id = Column(Integer, ForeignKey("concepts.id"), nullable=False)
+    # 0.0–1.0, agent-evaluated understanding demonstrated in chat
+    chat_score = Column(Float, nullable=False, default=0.0)
+    chat_updated_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (UniqueConstraint("user_id", "concept_id"),)
+
+    user = relationship("User", back_populates="concept_progress")
+    concept = relationship("Concept", back_populates="concept_progress")

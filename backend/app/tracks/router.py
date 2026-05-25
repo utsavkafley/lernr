@@ -1,25 +1,14 @@
-import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth.dependencies import get_current_user
+from app.concepts import completed_track_ids
 from app.database import get_db
-from app.models import Question, QuestionConcept, Track, User, UserTrackProgress
+from app.models import Question, QuestionConcept, Track, User
 from app.schemas import TrackDetailResponse, TrackResponse
 
 router = APIRouter(prefix="/tracks", tags=["tracks"])
-
-
-def _completed_track_ids(user: User, db: Session) -> set[int]:
-    rows = db.execute(
-        select(UserTrackProgress.track_id).where(
-            UserTrackProgress.user_id == user.id,
-            UserTrackProgress.completed == True,
-        )
-    ).scalars().all()
-    
-    return set(rows)
 
 
 @router.get("", response_model=list[TrackResponse])
@@ -28,7 +17,7 @@ def list_tracks(
     current_user: User = Depends(get_current_user),
 ):
     tracks = db.execute(select(Track).order_by(Track.number)).scalars().all()
-    completed = _completed_track_ids(current_user, db)
+    completed = set(completed_track_ids(current_user.id, db))
     result = []
     for track in tracks:
         t = TrackResponse.model_validate(track)
@@ -55,7 +44,7 @@ def get_track(
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
 
-    completed = _completed_track_ids(current_user, db)
+    completed = set(completed_track_ids(current_user.id, db))
     result = TrackDetailResponse.model_validate(track)
     result.completed = track.id in completed
     return result

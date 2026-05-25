@@ -13,15 +13,16 @@ the Language Transfer method — it asks, never tells.
 """
 
 import json
-from typing import TypedDict
+from typing import Optional, TypedDict
 
 import anthropic
 from langgraph.graph import END, START, StateGraph
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.concepts import concept_stats, max_completed_track_number, set_chat_score
 from app.config import settings
-from app.models import Attempt, Concept, Question, QuestionConcept, UserTrackProgress
+from app.models import Concept
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +45,7 @@ class TeachingStep(TypedDict):
 
 class SessionPlan(TypedDict):
     target_concept: str
+    target_concept_id: Optional[int]   # resolved concept id, for progress writeback
     goal: str                       # one sentence: what mastery looks like
     teaching_chain: list[TeachingStep]
     current_step: int
@@ -59,62 +61,12 @@ class TurnEvaluation(TypedDict):
 class TutorState(TypedDict):
     messages: list              # [{"role": "user"|"assistant", "content": str}]
     user_id: str
+    target_concept_id: Optional[int]  # seeded from ProgressView "Chat" button
     student_model: dict         # concept_name → StudentModel
     session_plan: SessionPlan
     last_evaluation: TurnEvaluation
-
-
-# ---------------------------------------------------------------------------
-# DB helpers
-# ---------------------------------------------------------------------------
-
-def _fetch_concept_stats(user_id: str, db: Session) -> dict:
-    """Return concept_name → StudentModel for every concept the user has tried."""
-    rows = db.execute(
-        select(
-            Concept.name,
-            func.count(Attempt.id).label("total"),
-            func.count(Attempt.id).filter(
-                Attempt.evaluation_state.in_(["correct", "acceptable"])
-            ).label("correct"),
-        )
-        .join(QuestionConcept, QuestionConcept.concept_id == Concept.id)
-        .join(Attempt, Attempt.question_id == QuestionConcept.question_id)
-        .where(Attempt.user_id == user_id)
-        .group_by(Concept.name)
-        .having(func.count(Attempt.id) > 0)
-    ).all()
-
-    model: dict = {}
-    for r in rows:
-        accuracy = round((r.correct or 0) / r.total, 2)
-        model[r.name] = StudentModel(
-            accuracy=accuracy,
-            attempts=r.total,
-            mastered=(accuracy >= 0.75 and r.total >= 3),
-        )
-    return model
-
-
-def _completed_track_ids(user_id: str, db: Session) -> list[int]:
-    return db.execute(
-        select(UserTrackProgress.track_id).where(
-            UserTrackProgress.user_id == user_id,
-            UserTrackProgress.completed == True,
-        )
-    ).scalars().all()
-
-
-def _max_completed_track_number(user_id: str, db: Session) -> int:
-    """Return the highest track number the user has completed (0 if none)."""
-    from app.models import Track
-    completed_ids = _completed_track_ids(user_id, db)
-    if not completed_ids:
-        return 0
-    result = db.execute(
-        select(func.max(Track.number)).where(Track.id.in_(completed_ids))
-    ).scalar()
-    return result or 0
+    suggest_quiz: bool          # True when chat shows mastery → nudge to quiz
+    chat_score: float           # last agent-evaluated chat understanding (0–1)
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +125,14 @@ def build_graph(checkpointer, db: Session):
 
     # ── build_student_model ─────────────────────────────────────────────────
     def build_student_model(state: TutorState) -> TutorState:
-        model = _fetch_concept_stats(state["user_id"], db)
+        model = {
+            s.name: StudentModel(
+                accuracy=s.blended,
+                attempts=s.total_attempts,
+                mastered=s.mastered,
+            )
+            for s in concept_stats(state["user_id"], db)
+        }
         return {**state, "student_model": model}
 
     # ── plan_session ────────────────────────────────────────────────────────
@@ -181,31 +140,42 @@ def build_graph(checkpointer, db: Session):
         model: dict = state.get("student_model", {})
 
         # Only consider concepts introduced up to the student's highest completed track
-        max_track = _max_completed_track_number(state["user_id"], db)
+        max_track = max_completed_track_number(state["user_id"], db)
         available_concepts: set[str] = set(
             db.execute(
                 select(Concept.name).where(Concept.first_track <= max_track)
             ).scalars().all()
         ) if max_track > 0 else set()
 
-        # Split into weak (needs work) and known (can build from)
-        # — constrained to concepts the student has actually been exposed to
+        # not-yet-mastered concepts the student has actually been exposed to
         weak = {
             name: m for name, m in model.items()
             if not m["mastered"] and m["attempts"] >= 1
             and (not available_concepts or name in available_concepts)
         }
-        known = {
-            name: m for name, m in model.items()
-            if m["mastered"]
-        }
+        known = {name: m for name, m in model.items() if m["mastered"]}
 
-        # If nothing attempted yet, prime with the earliest available concept
-        if not weak:
-            weak = {"present tense verbs": {"accuracy": 0.0, "attempts": 0, "mastered": False}}
-
-        # Sort weak by accuracy ascending — pick the weakest
-        target_concept = min(weak, key=lambda n: weak[n]["accuracy"])
+        # Pick the target concept ------------------------------------------------
+        seeded_id = state.get("target_concept_id")
+        if seeded_id:
+            # Concept-specific session opened from the progress view
+            target_concept = db.execute(
+                select(Concept.name).where(Concept.id == seeded_id)
+            ).scalar_one_or_none() or "present tense verbs"
+            target_concept_id = seeded_id
+        elif weak:
+            # Start with the concept CLOSEST to mastery — reinforce what's nearly
+            # solid rather than ambushing the student with their weakest spot.
+            target_concept = max(weak, key=lambda n: weak[n]["accuracy"])
+            target_concept_id = db.execute(
+                select(Concept.id).where(Concept.name == target_concept)
+            ).scalar_one_or_none()
+        else:
+            # Nothing attempted yet — prime with the earliest concept
+            target_concept = "present tense verbs"
+            target_concept_id = db.execute(
+                select(Concept.id).where(Concept.name == target_concept)
+            ).scalar_one_or_none()
 
         known_summary = (
             ", ".join(f"{n} ({round(m['accuracy']*100)}%)" for n, m in sorted(
@@ -288,7 +258,8 @@ Return ONLY valid JSON, no prose:
             }
 
         plan: SessionPlan = {
-            "target_concept": plan_data["target_concept"],
+            "target_concept": target_concept,
+            "target_concept_id": target_concept_id,
             "goal": plan_data.get("goal", ""),
             "teaching_chain": plan_data.get("teaching_chain", []),
             "current_step": 0,
@@ -345,14 +316,51 @@ Return ONLY valid JSON, no prose:
             what_was_wrong=ev.get("what_was_wrong", ""),
             encouragement=ev.get("encouragement", ""),
         )
-        return {**state, "last_evaluation": evaluation}
+        return {**state, "last_evaluation": evaluation, "suggest_quiz": False}
 
     # ── advance_or_stay router ──────────────────────────────────────────────
     def advance_or_stay(state: TutorState) -> str:
         ev: TurnEvaluation = state.get("last_evaluation", {})
-        if ev.get("verdict") in ("correct", "acceptable"):
-            return "advance"
-        return "stay"
+        if ev.get("verdict") not in ("correct", "acceptable"):
+            return "stay"
+        plan: SessionPlan = state.get("session_plan", {})
+        chain = plan.get("teaching_chain", [])
+        if plan.get("current_step", 0) >= len(chain) - 1:
+            return "complete"   # finished the final step — assess + nudge to quiz
+        return "advance"
+
+    # ── assess_progress ─────────────────────────────────────────────────────
+    def assess_progress(state: TutorState) -> TutorState:
+        """On chain completion, score chat understanding and write it to the DB."""
+        plan: SessionPlan = state.get("session_plan", {})
+        concept_id = plan.get("target_concept_id")
+        msgs = state.get("messages", [])
+
+        if not concept_id:
+            return {**state, "suggest_quiz": True}
+
+        transcript = "\n".join(
+            f"{m['role']}: {m['content']}" for m in msgs[-12:]
+        )
+        system = (
+            "You are scoring how well a student demonstrated understanding of a "
+            "target Spanish concept during a tutoring chat. Reply with ONLY a "
+            "number between 0 and 1 (e.g. 0.8). 0 = no understanding shown, "
+            "1 = produced the concept correctly and confidently on their own."
+        )
+        user = (
+            f"Target concept: {plan.get('target_concept', '')}\n\n"
+            f"Conversation:\n{transcript}"
+        )
+        raw = _claude(system, user, max_tokens=8)
+        try:
+            score = float(raw.strip().split()[0])
+        except (ValueError, IndexError):
+            score = 0.6
+
+        score = round(min(max(score, 0.0), 1.0), 2)
+        set_chat_score(state["user_id"], concept_id, score, db)
+        return {**state, "suggest_quiz": True, "chat_score": score}
 
     # ── advance_step ────────────────────────────────────────────────────────
     def advance_step(state: TutorState) -> TutorState:
@@ -375,15 +383,16 @@ Return ONLY valid JSON, no prose:
         ev: TurnEvaluation = state.get("last_evaluation") or {}
         is_final_step = step_idx == len(chain) - 1
 
-        system = """You are a Spanish tutor in the spirit of Michel Thomas / Language Transfer.
+        system = """You're a friend who happens to be great at Spanish, teaching casually over coffee — not a professor.
 
-THE ONLY RULE THAT MATTERS: Always ask the student to produce Spanish.
-Every response ends with a question like "How would you say '___'?" or "Try saying '___' in Spanish."
-Never ask comprehension questions in English. Never ask about grammar concepts.
-Never ask "who does X refer to?" or "are they the same person?" — these are not LT-style.
+THE ONLY RULE THAT MATTERS: Always end by asking the student to produce Spanish.
+End every reply with something like "How would you say '___'?" or "Try saying '___'."
+Never ask comprehension questions in English. Never ask about grammar concepts or terms.
+Never ask "who does X refer to?" or "are they the same person?" — that's not the vibe.
 
-The student should always be attempting to say or complete a Spanish word/phrase.
-Warm, short (1-3 sentences), always ends with a Spanish production question."""
+Tone: relaxed, encouraging, plain language. Talk like a person, not a textbook.
+No jargon, no lecturing. Keep it SHORT — 1-2 sentences, then the question.
+The student should always be the one saying or completing the Spanish."""
 
         # Build the context block for this turn
         context_parts = [
@@ -443,6 +452,7 @@ Warm, short (1-3 sentences), always ends with a Spanish production question."""
     graph.add_node("plan_session", plan_session)
     graph.add_node("evaluate_turn", evaluate_turn)
     graph.add_node("advance_step", advance_step)
+    graph.add_node("assess_progress", assess_progress)
     graph.add_node("converse", converse)
 
     graph.add_conditional_edges(START, entry_router, {
@@ -458,7 +468,9 @@ Warm, short (1-3 sentences), always ends with a Spanish production question."""
     graph.add_conditional_edges("evaluate_turn", advance_or_stay, {
         "advance": "advance_step",
         "stay": "converse",
+        "complete": "assess_progress",
     })
     graph.add_edge("advance_step", "converse")
+    graph.add_edge("assess_progress", "converse")
 
     return graph.compile(checkpointer=checkpointer)

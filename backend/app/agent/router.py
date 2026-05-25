@@ -33,6 +33,7 @@ async def chat(
     body = await request.json()
     session_id: str = body.get("session_id") or str(uuid.uuid4())
     user_message: str = body.get("message", "").strip()
+    concept_id = body.get("concept_id")  # optional — seeds a concept-specific session
 
     thread_id = f"{current_user.id}:{session_id}"
     config = {"configurable": {"thread_id": thread_id}}
@@ -64,6 +65,7 @@ async def chat(
                 base: TutorState = {
                     "messages": [],
                     "user_id": str(current_user.id),
+                    "target_concept_id": concept_id,
                     "student_model": {},
                     "session_plan": {},
                     "last_evaluation": {},
@@ -98,7 +100,17 @@ async def chat(
         current_step = plan.get("current_step", 0)
         total_steps = len(chain)
 
-        yield f"data: {json.dumps({'type': 'done', 'concept': plan.get('target_concept', ''), 'evaluation': (result.get('last_evaluation') or {}).get('verdict', ''), 'step': current_step + 1, 'total_steps': total_steps})}\n\n"
+        done = {
+            "type": "done",
+            "concept": plan.get("target_concept", ""),
+            "concept_id": plan.get("target_concept_id"),
+            "evaluation": (result.get("last_evaluation") or {}).get("verdict", ""),
+            "step": current_step + 1,
+            "total_steps": total_steps,
+            "suggest_quiz": bool(result.get("suggest_quiz")),
+            "chat_score": result.get("chat_score", 0.0),
+        }
+        yield f"data: {json.dumps(done)}\n\n"
 
     return StreamingResponse(
         stream(),

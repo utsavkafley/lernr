@@ -4,11 +4,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
+from app.concepts import concept_stats
 from app.database import get_db
-from app.models import (
-    Attempt, Concept, Question, QuestionConcept,
-    Track, User, UserTrackProgress
-)
+from app.models import Attempt, Track, User, UserTrackProgress
 from app.schemas import ConceptStatsResponse, ProgressSummaryResponse
 
 router = APIRouter(prefix="/progress", tags=["progress"])
@@ -22,7 +20,7 @@ def _get_or_404(db: Session, number: int) -> Track:
 
 
 @router.post("/tracks/{number}/complete", status_code=204)
-def mark_coomplete(
+def mark_complete(
     number: int,
     db: Session  = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -68,30 +66,18 @@ def unmark_complete(
 
 
 def _concept_stats(user_id, db: Session) -> list[ConceptStatsResponse]:
-    rows = db.execute(
-        select(
-            Concept.id,
-            Concept.name,
-            func.count(Attempt.id).label("total"),
-            func.count(Attempt.id).filter(
-                Attempt.evaluation_state.in_(["correct", "acceptable"])
-            ).label("correct"),
-        )
-        .join(QuestionConcept, QuestionConcept.concept_id == Concept.id)
-        .join(Attempt, Attempt.question_id == QuestionConcept.question_id)
-        .where(Attempt.user_id == user_id)
-        .group_by(Concept.id, Concept.name)
-    ).all()
-
     return [
         ConceptStatsResponse(
-            concept_id=r.id,
-            name=r.name,
-            total_attempts=r.total,
-            correct_attempts=r.correct or 0,
-            accuracy=round((r.correct or 0) / r.total, 2) if r.total else 0.0,
+            concept_id=s.concept_id,
+            name=s.name,
+            total_attempts=s.total_attempts,
+            correct_attempts=s.correct_attempts,
+            quiz_accuracy=s.quiz_accuracy,
+            chat_score=s.chat_score,
+            blended=s.blended,
+            mastered=s.mastered,
         )
-        for r in rows
+        for s in concept_stats(user_id, db)
     ]
 
 
@@ -146,9 +132,8 @@ def weak_concepts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    from app.config import settings
     stats = _concept_stats(current_user.id, db)
-    weak = [s for s in stats if s.accuracy < settings.mastery_threshold]
-    return sorted(weak, key=lambda s: s.accuracy)
+    weak = [s for s in stats if not s.mastered]
+    return sorted(weak, key=lambda s: s.blended)
 
 

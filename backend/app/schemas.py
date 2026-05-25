@@ -73,7 +73,10 @@ class ConceptStatsResponse(BaseModel):
     name: str
     total_attempts: int
     correct_attempts: int
-    accuracy: float
+    quiz_accuracy: float
+    chat_score: float
+    blended: float
+    mastered: bool
 
 class ProgressSummaryResponse(BaseModel):
     tracks_completed: int

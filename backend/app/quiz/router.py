@@ -1,15 +1,18 @@
 import random
 import unicodedata
 
+from typing import Optional
+
 import anthropic
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth.dependencies import get_current_user
+from app.concepts import completed_track_ids, concept_stats
 from app.config import settings
 from app.database import get_db
-from app.models import Attempt, Question, QuestionConcept, User, UserTrackProgress
+from app.models import Attempt, Question, QuestionConcept, User
 from app.schemas import ConceptResponse, QuizQuestionResponse, SubmitAnswerRequest, SubmitAnswerResponse
 
 router = APIRouter(prefix="/quiz", tags=["quiz"])
@@ -73,29 +76,32 @@ def _evaluate(question: Question, user_answer: str) -> str:
 
 @router.get("/next", response_model=QuizQuestionResponse)
 def next_question(
+    concept_id: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    completed_track_ids = db.execute(
-        select(UserTrackProgress.track_id).where(
-            UserTrackProgress.user_id == current_user.id,
-            UserTrackProgress.completed == True,
-        )
-    ).scalars().all()
+    completed_ids = completed_track_ids(current_user.id, db)
 
-    if not completed_track_ids:
+    if not completed_ids:
         raise HTTPException(status_code=404, detail="No completed tracks yet")
 
-    all_questions = db.execute(
+    query = (
         select(Question)
-        .where(Question.track_id.in_(completed_track_ids))
+        .where(Question.track_id.in_(completed_ids))
         .options(
             selectinload(Question.question_concepts).selectinload(QuestionConcept.concept)
         )
-    ).scalars().all()
+    )
+    if concept_id is not None:
+        query = query.join(
+            QuestionConcept, QuestionConcept.question_id == Question.id
+        ).where(QuestionConcept.concept_id == concept_id)
+
+    all_questions = db.execute(query).scalars().all()
 
     if not all_questions:
-        raise HTTPException(status_code=404, detail="No questions available")
+        detail = "No questions for this concept" if concept_id else "No questions available"
+        raise HTTPException(status_code=404, detail=detail)
 
     recent_ids = set(
         db.execute(
@@ -110,30 +116,14 @@ def next_question(
     if len(pool) < settings.min_pool_size:
         pool = list(all_questions)
 
-    concept_rows = db.execute(
-        select(
-            QuestionConcept.concept_id,
-            func.count(Attempt.id).label("total"),
-            func.count(Attempt.id).filter(
-                Attempt.evaluation_state.in_(["correct", "acceptable"])
-            ).label("correct"),
-        )
-        .join(Attempt, Attempt.question_id == QuestionConcept.question_id)
-        .where(Attempt.user_id == current_user.id)
-        .group_by(QuestionConcept.concept_id)
-    ).all()
-
-    # concept_id → accuracy (0.0–1.0); unseen concepts default to 0.5
-    concept_accuracy = {
-        r.concept_id: (r.correct / r.total if r.total else 0.5)
-        for r in concept_rows
-    }
+    # concept_id → blended score (0.0–1.0); unseen concepts default to 0.5
+    blended = {s.concept_id: s.blended for s in concept_stats(current_user.id, db)}
 
     def _weight(q: Question) -> float:
         ids = [qc.concept_id for qc in q.question_concepts]
         if not ids:
             return 0.5
-        return sum(1.0 - concept_accuracy.get(cid, 0.5) for cid in ids) / len(ids)
+        return sum(1.0 - blended.get(cid, 0.5) for cid in ids) / len(ids)
 
     weights = [_weight(q) for q in pool]
     if all(w == 0.0 for w in weights):

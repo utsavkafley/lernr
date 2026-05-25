@@ -8,6 +8,7 @@ import { speakSpanish } from '@/composables/useSpeech'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import tutorIllustration from '@/assets/tutor_question.svg'
 
 const quiz = useQuizStore()
 const answer = ref('')
@@ -114,9 +115,7 @@ const stateConfig: Record<'correct' | 'acceptable' | 'incorrect', ResultStyle> =
 
     <!-- No completed tracks -->
     <div v-if="quiz.noTracksCompleted" class="border border-border/60 rounded-2xl p-10 text-center bg-card animate-scale-in">
-      <div class="w-12 h-12 rounded-full bg-muted mx-auto mb-4 flex items-center justify-center text-2xl">
-        🎧
-      </div>
+      <img :src="tutorIllustration" alt="" aria-hidden="true" class="w-44 mx-auto mb-5 animate-float" />
       <p class="text-lg font-semibold mb-1">No completed tracks yet</p>
       <p class="text-sm text-muted-foreground max-w-sm mx-auto">
         Listen to your first Language Transfer track, then mark it complete on the Tracks page to unlock practice questions.

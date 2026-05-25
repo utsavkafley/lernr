@@ -10,12 +10,6 @@ from app.agent.router import router as agent_router
 
 app = FastAPI(title="Lernr API")
 
-app.include_router(auth_router)
-app.include_router(tracks_router)
-app.include_router(progress_router)
-app.include_router(quiz_router)
-app.include_router(agent_router)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -23,6 +17,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
+app.include_router(tracks_router)
+app.include_router(progress_router)
+app.include_router(quiz_router)
+app.include_router(agent_router)
 
 
 @app.get("/health")

@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useStream } from '@/composables/useStream'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import tutorIllustration from '@/assets/tutor_question.svg'
+import happyIllustration from '@/assets/feeling_happy.svg'
 
 function renderMarkdown(text: string): string {
   return text
@@ -136,10 +138,8 @@ const evalLabel = computed(() => {
     >
       <!-- Empty / loading state -->
       <div v-if="messages.length === 0" class="h-full flex items-center justify-center">
-        <div class="text-center space-y-3">
-          <div class="w-12 h-12 rounded-full bg-primary/10 mx-auto flex items-center justify-center text-2xl">
-            🧠
-          </div>
+        <div class="text-center space-y-4">
+          <img :src="tutorIllustration" alt="" aria-hidden="true" class="w-48 mx-auto animate-float" />
           <p class="text-sm text-muted-foreground">Starting your session…</p>
         </div>
       </div>
@@ -182,19 +182,22 @@ const evalLabel = computed(() => {
         v-if="suggestQuiz && !isStreaming"
         class="flex justify-start animate-fade-up"
       >
-        <div class="max-w-[80%] rounded-2xl rounded-tl-sm bg-primary/10 border border-primary/20 px-4 py-3 space-y-2">
-          <p class="text-sm font-medium text-primary">
-            You're getting this! Lock it in with the quiz.
-          </p>
-          <p class="text-xs text-muted-foreground">
-            Chat score: {{ Math.round(chatScore * 100) }}% — take the quiz to push it to mastery.
-          </p>
-          <button
-            @click="router.push({ path: '/practice', query: { concept_id: currentConceptId, concept_name: currentConcept } })"
-            class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
-          >
-            Take the quiz on "{{ currentConcept }}" →
-          </button>
+        <div class="max-w-[80%] rounded-2xl rounded-tl-sm bg-primary/10 border border-primary/20 px-4 py-3 flex items-center gap-4">
+          <img :src="happyIllustration" alt="" aria-hidden="true" class="w-16 shrink-0 hidden sm:block" />
+          <div class="space-y-2">
+            <p class="text-sm font-medium text-primary">
+              You're getting this! Lock it in with the quiz.
+            </p>
+            <p class="text-xs text-muted-foreground">
+              Chat score: {{ Math.round(chatScore * 100) }}% — take the quiz to push it to mastery.
+            </p>
+            <button
+              @click="router.push({ path: '/practice', query: { concept_id: currentConceptId, concept_name: currentConcept } })"
+              class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+            >
+              Take the quiz on "{{ currentConcept }}" →
+            </button>
+          </div>
         </div>
       </div>
 

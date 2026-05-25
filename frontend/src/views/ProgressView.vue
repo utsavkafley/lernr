@@ -2,6 +2,8 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/composables/useApi'
+import growingIllustration from '@/assets/growing.svg'
+import winningIllustration from '@/assets/winning.svg'
 
 const router = useRouter()
 
@@ -33,12 +35,27 @@ onMounted(async () => {
   loading.value = false
 })
 
+type Tab = 'developing' | 'mastered'
+const activeTab = ref<Tab>('developing')
+
 const sortedConcepts = computed(() => {
   if (!summary.value) return []
+  if (activeTab.value === 'mastered') {
+    return [...summary.value.concept_stats]
+      .filter(c => c.mastered)
+      .sort((a, b) => b.blended - a.blended)
+  }
   return [...summary.value.concept_stats]
     .filter(c => !c.mastered)
-    .sort((a, b) => b.blended - a.blended)  // closest to mastery first
+    .sort((a, b) => b.blended - a.blended)
 })
+
+const developingCount = computed(() =>
+  summary.value?.concept_stats.filter(c => !c.mastered).length ?? 0
+)
+const masteredCount = computed(() =>
+  summary.value?.concept_stats.filter(c => c.mastered).length ?? 0
+)
 
 const trackPct = computed(() => {
   if (!summary.value || !summary.value.total_tracks) return 0
@@ -134,18 +151,57 @@ function goToQuiz(concept: ConceptStat) {
 
       <!-- Concept breakdown -->
       <div class="rounded-2xl border border-border/60 bg-card overflow-hidden">
-        <div class="px-6 py-5 border-b border-border/60">
-          <h2 class="text-lg font-semibold">Needs work</h2>
-          <p class="text-sm text-muted-foreground mt-0.5">Concepts below mastery threshold, sorted by weakest first</p>
+        <!-- Tabs -->
+        <div class="px-6 pt-5 pb-0 border-b border-border/60">
+          <div class="flex gap-1 mb-0">
+            <button
+              @click="activeTab = 'developing'"
+              class="px-4 py-2 text-sm font-medium rounded-t-lg transition-colors -mb-px border-b-2"
+              :class="activeTab === 'developing'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'"
+            >
+              Developing
+              <span class="ml-1.5 text-xs px-1.5 py-0.5 rounded-full bg-muted tabular-nums">{{ developingCount }}</span>
+            </button>
+            <button
+              @click="activeTab = 'mastered'"
+              class="px-4 py-2 text-sm font-medium rounded-t-lg transition-colors -mb-px border-b-2"
+              :class="activeTab === 'mastered'
+                ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
+                : 'border-transparent text-muted-foreground hover:text-foreground'"
+            >
+              Mastered
+              <span class="ml-1.5 text-xs px-1.5 py-0.5 rounded-full bg-muted tabular-nums">{{ masteredCount }}</span>
+            </button>
+          </div>
         </div>
 
         <div v-if="sortedConcepts.length === 0" class="p-10 text-center">
           <p class="text-sm text-muted-foreground">
-            Nothing here — you've mastered every concept you've practiced! 🎉
+            {{ activeTab === 'mastered' ? 'No concepts mastered yet — keep practicing!' : 'Nothing here — you\'ve solidified every concept you\'ve practiced!' }}
           </p>
         </div>
 
-        <div v-else class="divide-y divide-border/40">
+        <div v-else>
+          <!-- Panel banner -->
+          <div class="flex items-center gap-4 px-6 py-4 border-b border-border/40 bg-muted/20">
+            <img
+              :src="activeTab === 'developing' ? growingIllustration : winningIllustration"
+              alt=""
+              aria-hidden="true"
+              class="w-16 shrink-0"
+            />
+            <p class="text-sm text-muted-foreground leading-snug">
+              <span v-if="activeTab === 'developing'">
+                These are the concepts you're actively building. Keep at it — every attempt compounds.
+              </span>
+              <span v-else>
+                You've locked these in. Solid foundation to build from.
+              </span>
+            </p>
+          </div>
+          <div class="divide-y divide-border/40">
           <div
             v-for="(concept, idx) in sortedConcepts"
             :key="concept.concept_id"
@@ -173,24 +229,21 @@ function goToQuiz(concept: ConceptStat) {
             </div>
             <div class="flex items-center justify-between mt-2">
               <p class="text-xs text-muted-foreground tabular-nums">
-                quiz {{ Math.round(concept.quiz_accuracy * 100) }}%
-                <span v-if="concept.chat_score > 0" class="ml-2">· chat {{ Math.round(concept.chat_score * 100) }}%</span>
+                {{ concept.correct_attempts }} / {{ concept.total_attempts }} correct
               </p>
-              <div class="flex gap-1.5">
+              <div v-if="!concept.mastered" class="flex gap-1.5">
                 <button
                   @click="goToTutor(concept)"
                   class="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-                >
-                  Chat
-                </button>
+                >Chat</button>
                 <button
                   @click="goToQuiz(concept)"
                   class="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
-                >
-                  Quiz
-                </button>
+                >Quiz</button>
               </div>
+              <span v-else class="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">✓ Mastered</span>
             </div>
+          </div>
           </div>
         </div>
       </div>

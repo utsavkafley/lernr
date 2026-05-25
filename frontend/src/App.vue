@@ -4,6 +4,7 @@ import { useAuthStore } from '@/stores/auth'
 import { usePlayerStore } from '@/stores/player'
 import { Button } from '@/components/ui/button'
 import AudioPlayer from '@/components/AudioPlayer.vue'
+import logoUrl from '@/assets/lernr_logo_web.png'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -31,20 +32,21 @@ const navItems = [
     >
       <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
         <div class="flex items-center gap-1">
-          <RouterLink to="/tracks" class="flex items-center gap-2 mr-6 group">
-            <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-accent-foreground flex items-center justify-center text-primary-foreground font-bold text-sm shadow-sm group-hover:scale-105 transition-transform">
-              L
-            </div>
-            <span class="font-bold tracking-tight text-lg">lernr</span>
+          <RouterLink to="/" class="flex items-center gap-2.5 mr-6 group">
+            <img
+              :src="logoUrl"
+              alt="lernr"
+              class="w-14 h-14 rounded-lg object-cover shadow-sm ring-1 ring-border/50 group-hover:scale-105 transition-transform"
+            />
           </RouterLink>
           <nav class="flex items-center gap-1">
             <RouterLink
               v-for="item in navItems"
               :key="item.to"
               :to="item.to"
-              class="text-sm px-3.5 py-1.5 rounded-full transition-all"
+              class="text-sm px-4 py-1.5 rounded-full transition-all font-medium"
               :class="route.path === item.to
-                ? 'bg-foreground text-background font-medium'
+                ? 'bg-foreground text-background'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
             >
               {{ item.label }}

@@ -190,7 +190,7 @@ function goToQuiz(concept: ConceptStat) {
               :src="activeTab === 'developing' ? growingIllustration : winningIllustration"
               alt=""
               aria-hidden="true"
-              class="w-16 shrink-0"
+              class="w-28 shrink-0"
             />
             <p class="text-sm text-muted-foreground leading-snug">
               <span v-if="activeTab === 'developing'">
@@ -212,9 +212,9 @@ function goToQuiz(concept: ConceptStat) {
               <span class="font-medium flex-1 truncate">{{ concept.name }}</span>
               <span
                 class="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full"
-                :class="blendedBg(concept.blended)"
+                :class="concept.mastered ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' : blendedBg(concept.blended)"
               >
-                {{ blendedLabel(concept.blended) }}
+                {{ concept.mastered ? 'Mastered' : blendedLabel(concept.blended) }}
               </span>
               <span :class="blendedColor(concept.blended)" class="font-bold tabular-nums w-12 text-right">
                 {{ Math.round(concept.blended * 100) }}%

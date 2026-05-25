@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useQuizStore } from '@/stores/quiz'
 
@@ -12,6 +12,7 @@ import tutorIllustration from '@/assets/tutor_question.svg'
 
 const quiz = useQuizStore()
 const answer = ref('')
+const inputEl = ref<InstanceType<typeof Input> | null>(null)
 // Snapshot the answer at submit time so it survives clearing the input.
 const submittedAnswer = ref('')
 
@@ -49,6 +50,7 @@ async function next() {
   answer.value = ''
   submittedAnswer.value = ''
   await quiz.fetchNext()
+  nextTick(() => inputEl.value?.$el?.focus())
 }
 
 const accuracy = computed(() =>
@@ -149,6 +151,7 @@ const stateConfig: Record<'correct' | 'acceptable' | 'incorrect', ResultStyle> =
         <div v-if="!quiz.result" class="space-y-3">
           <div class="flex gap-2">
             <Input
+              ref="inputEl"
               v-model="answer"
               placeholder="Type your Spanish answer…"
               @keydown.enter="submit"

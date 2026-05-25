@@ -33,7 +33,7 @@ const conceptNameFromRoute = computed(() => {
 
 const input = ref('')
 const scrollEl = ref<HTMLElement | null>(null)
-const inputEl = ref<HTMLInputElement | null>(null)
+const inputEl = ref<InstanceType<typeof import('@/components/ui/input').Input> | null>(null)
 
 // Auto-scroll whenever messages change or streaming updates
 watch(
@@ -44,7 +44,7 @@ watch(
 
 // Refocus input whenever streaming finishes
 watch(isStreaming, (streaming) => {
-  if (!streaming) nextTick(() => inputEl.value?.focus())
+  if (!streaming) nextTick(() => inputEl.value?.$el?.focus())
 })
 
 function handleKeydown(e: KeyboardEvent) {
@@ -65,7 +65,7 @@ async function submit() {
   if (!msg || isStreaming.value) return
   input.value = ''
   await send(msg)
-  nextTick(() => inputEl.value?.focus())
+  nextTick(() => inputEl.value?.$el?.focus())
 }
 
 async function handleReset() {

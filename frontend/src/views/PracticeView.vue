@@ -53,6 +53,10 @@ async function next() {
   nextTick(() => inputEl.value?.$el?.focus())
 }
 
+function dismissMastery() {
+  quiz.clearNewlyMastered()
+}
+
 const accuracy = computed(() =>
   quiz.sessionTotal > 0 ? Math.round((quiz.sessionCorrect / quiz.sessionTotal) * 100) : 0,
 )
@@ -288,4 +292,44 @@ const stateConfig: Record<'correct' | 'acceptable' | 'incorrect', ResultStyle> =
       </div>
     </div>
   </div>
+
+  <!-- Mastery modal -->
+  <Transition name="fade">
+    <div
+      v-if="quiz.newlyMastered.length"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      @click.self="dismissMastery"
+    >
+      <div class="bg-card border border-border rounded-2xl shadow-2xl p-8 max-w-sm w-full mx-4 text-center animate-scale-in">
+        <div class="text-5xl mb-4">🏆</div>
+        <h2 class="text-2xl font-bold tracking-tight mb-2">Concept mastered!</h2>
+        <p class="text-muted-foreground text-sm mb-5">
+          You've demonstrated solid understanding of
+        </p>
+        <div class="flex flex-wrap gap-2 justify-center mb-6">
+          <Badge
+            v-for="concept in quiz.newlyMastered"
+            :key="concept.id"
+            class="text-sm px-3 py-1 bg-primary text-primary-foreground"
+          >
+            {{ concept.name }}
+          </Badge>
+        </div>
+        <Button @click="dismissMastery" class="w-full h-11 font-medium">
+          Keep going
+        </Button>
+      </div>
+    </div>
+  </Transition>
 </template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

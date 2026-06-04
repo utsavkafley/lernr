@@ -18,6 +18,7 @@ interface SubmitResult {
   feedback: string
   expected_answer: string
   alternate_answers: string[]
+  newly_mastered_concepts: Concept[]
 }
 
 export const useQuizStore = defineStore('quiz', () => {
@@ -26,6 +27,7 @@ export const useQuizStore = defineStore('quiz', () => {
   const hint = ref<string | null>(null)
   const loading = ref(false)
   const noTracksCompleted = ref(false)
+  const newlyMastered = ref<Concept[]>([])
 
   // Session stats
   const sessionTotal = ref(0)
@@ -70,6 +72,13 @@ export const useQuizStore = defineStore('quiz', () => {
     if (data.evaluation_state !== 'incorrect') {
       sessionCorrect.value++
     }
+    if (data.newly_mastered_concepts?.length) {
+      newlyMastered.value = data.newly_mastered_concepts
+    }
+  }
+
+  function clearNewlyMastered() {
+    newlyMastered.value = []
   }
 
   function resetSession(filterConceptId?: number | null) {
@@ -80,6 +89,7 @@ export const useQuizStore = defineStore('quiz', () => {
     sessionCorrect.value = 0
     noTracksCompleted.value = false
     conceptId.value = filterConceptId ?? null
+    newlyMastered.value = []
   }
 
   return {
@@ -88,6 +98,7 @@ export const useQuizStore = defineStore('quiz', () => {
     hint,
     loading,
     noTracksCompleted,
+    newlyMastered,
     sessionTotal,
     sessionCorrect,
     conceptId,
@@ -95,5 +106,6 @@ export const useQuizStore = defineStore('quiz', () => {
     fetchHint,
     submitAnswer,
     resetSession,
+    clearNewlyMastered,
   }
 })

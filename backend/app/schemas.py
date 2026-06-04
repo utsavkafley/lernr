@@ -102,4 +102,5 @@ class SubmitAnswerResponse(BaseModel):
     feedback: str
     expected_answer: str
     alternate_answers: list[str]
+    newly_mastered_concepts: list[ConceptResponse] = []
 

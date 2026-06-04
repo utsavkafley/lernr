@@ -178,6 +178,18 @@ def submit_answer(
     if not question:
         raise HTTPException(status_code=404, detail="Question not found")
 
+    # Concept IDs for this question
+    concept_ids = db.execute(
+        select(QuestionConcept.concept_id).where(QuestionConcept.question_id == question.id)
+    ).scalars().all()
+
+    # Snapshot mastery before this attempt
+    pre_mastered = {
+        s.concept_id
+        for s in concept_stats(current_user.id, db)
+        if s.concept_id in set(concept_ids) and s.mastered
+    }
+
     state = _evaluate(question, body.user_answer)
 
     db.add(Attempt(
@@ -187,6 +199,15 @@ def submit_answer(
         evaluation_state=state,
     ))
     db.commit()
+
+    # Check which concepts just crossed the mastery threshold
+    newly_mastered = [
+        ConceptResponse(id=s.concept_id, name=s.name)
+        for s in concept_stats(current_user.id, db)
+        if s.concept_id in set(concept_ids)
+        and s.concept_id not in pre_mastered
+        and s.mastered
+    ]
 
     if state == "correct":
         feedback = "Correct!"
@@ -200,4 +221,5 @@ def submit_answer(
         feedback=feedback,
         expected_answer=question.answer,
         alternate_answers=question.alternate_answers or [],
+        newly_mastered_concepts=newly_mastered,
     )

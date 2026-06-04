@@ -212,9 +212,9 @@ function goToQuiz(concept: ConceptStat) {
               <span class="font-medium flex-1 truncate">{{ concept.name }}</span>
               <span
                 class="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full"
-                :class="concept.mastered ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' : blendedBg(concept.blended)"
+                :class="Math.round(concept.blended * 100) === 100 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' : blendedBg(concept.blended)"
               >
-                {{ concept.mastered ? 'Mastered' : blendedLabel(concept.blended) }}
+                {{ Math.round(concept.blended * 100) === 100 ? 'Mastered' : blendedLabel(concept.blended) }}
               </span>
               <span :class="blendedColor(concept.blended)" class="font-bold tabular-nums w-12 text-right">
                 {{ Math.round(concept.blended * 100) }}%
@@ -241,7 +241,7 @@ function goToQuiz(concept: ConceptStat) {
                   class="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
                 >Quiz</button>
               </div>
-              <span v-else class="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">✓ Mastered</span>
+              <span v-else-if="Math.round(concept.blended * 100) < 100" class="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">✓ Mastered</span>
             </div>
           </div>
           </div>

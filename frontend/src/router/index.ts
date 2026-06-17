@@ -8,6 +8,7 @@ const router = createRouter({
         {path:'/', component:()=>import('@/views/HomeView.vue')},
         {path:'/tracks', component:()=>import('@/views/TracksView.vue')},
         {path:'/practice', component:()=>import('@/views/PracticeView.vue')},
+        {path:'/verbs', component:()=>import('@/views/VerbsView.vue')},
         {path:'/progress', component:()=>import('@/views/ProgressView.vue')},
         {path:'/tutor', component:()=>import('@/views/TutorView.vue')},
         {path:'/:pathMatch(.*)*', redirect: '/'},

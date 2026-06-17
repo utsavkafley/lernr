@@ -18,6 +18,7 @@ function logout() {
 const navItems = [
   { to: '/tracks', label: 'Tracks' },
   { to: '/practice', label: 'Practice' },
+  { to: '/verbs', label: 'Verbs' },
   { to: '/tutor', label: 'Tutor' },
   { to: '/progress', label: 'Progress' },
 ]
